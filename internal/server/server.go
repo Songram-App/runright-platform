@@ -124,6 +124,16 @@ func New(cfg Config) (*Server, error) {
 		}
 	}
 
+	// AI assistant — always non-nil (NewFromEnv reports "not configured"
+	// gracefully via IsConfigured() when no API key is set).
+	s.assistant = assistant.NewFromEnv(db)
+	if s.embeddings != nil {
+		s.assistant.SetEmbeddingService(s.embeddings)
+	}
+	if s.assistant.IsConfigured() {
+		fmt.Println("AI assistant initialized")
+	}
+
 	// SSO endpoints — no auth required for login/callback
 	sso := r.Group("/api/v1/sso")
 	{
@@ -153,7 +163,6 @@ func New(cfg Config) (*Server, error) {
 	cloud := r.Group("/api/v1/cloud")
 	{
 		cloud.GET("/auth/github", s.cloudAuthGitHub)
-		cloud.GET("/auth/github/callback", s.cloudAuthGitHubCallback)
 		cloud.GET("/auth/google", s.cloudAuthGoogle)
 		cloud.GET("/auth/google/callback", s.cloudAuthGoogleCallback)
 		cloud.GET("/status", s.cloudTenantStatus)

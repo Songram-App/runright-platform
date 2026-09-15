@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/go-github/v62/github"
@@ -62,6 +63,24 @@ func (s *Server) handleGitHubOAuthCallback(c *gin.Context) {
 	user, _, err := client.Users.Get(context.Background(), "")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get user: %v", err)})
+		return
+	}
+
+	// RunRight Cloud signup rides the same registered callback URL as
+	// normal dashboard login (GitHub Apps only allow one exact callback);
+	// it's distinguished by a "cloud:" prefix on the state param.
+	if strings.HasPrefix(c.Query("state"), cloudStatePrefix) {
+		if !s.verifyCloudOAuthState(c) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid or expired login attempt, please try again"})
+			return
+		}
+		email := user.GetEmail()
+		if email == "" {
+			// GitHub hides the primary email by default unless user:email scope
+			// AND a public/verified email exists; fall back to a stable address.
+			email = fmt.Sprintf("%d+%s@users.noreply.github.com", user.GetID(), user.GetLogin())
+		}
+		s.cloudCompleteSignup(c, email, user.GetName(), user.GetLogin(), user.GetAvatarURL(), "github", fmt.Sprintf("%d", user.GetID()))
 		return
 	}
 

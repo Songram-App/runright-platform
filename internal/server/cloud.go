@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/go-github/v62/github"
 	"golang.org/x/oauth2"
 	oauth2gh "golang.org/x/oauth2/github"
 	"golang.org/x/oauth2/google"
@@ -91,10 +90,16 @@ func (s *Server) verifyCloudOAuthState(c *gin.Context) bool {
 	if err != nil || cookie == "" {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(cookie), []byte(c.Query("state"))) == 1
+	queryState := strings.TrimPrefix(c.Query("state"), cloudStatePrefix)
+	return subtle.ConstantTimeCompare([]byte(cookie), []byte(queryState)) == 1
 }
 
-// --- GitHub signup (reuses the existing GitHub App OAuth credentials) ---
+// --- GitHub signup (reuses the existing GitHub App OAuth credentials AND its
+// existing callback URL — GitHub Apps only allow one exact registered
+// callback, so the cloud-vs-normal-login distinction rides in the `state`
+// param instead of a separate route; see handleGitHubOAuthCallback) ---
+
+const cloudStatePrefix = "cloud:"
 
 func (s *Server) cloudAuthGitHub(c *gin.Context) {
 	cfg := getCloudConfig()
@@ -115,55 +120,11 @@ func (s *Server) cloudAuthGitHub(c *gin.Context) {
 		ClientID:     ghCfg.ClientID,
 		ClientSecret: ghCfg.ClientSecret,
 		Endpoint:     oauth2gh.Endpoint,
-		RedirectURL:  cfg.baseURL + "/api/v1/cloud/auth/github/callback",
+		RedirectURL:  ghCfg.RedirectURL, // existing /api/v1/github/callback
 		Scopes:       []string{"read:user", "user:email"},
 	}
-	c.Redirect(http.StatusFound, oauth2Cfg.AuthCodeURL(state))
+	c.Redirect(http.StatusFound, oauth2Cfg.AuthCodeURL(cloudStatePrefix+state))
 }
-
-func (s *Server) cloudAuthGitHubCallback(c *gin.Context) {
-	cfg := getCloudConfig()
-	if !cfg.enabled {
-		c.JSON(http.StatusNotFound, gin.H{"error": "cloud signup is not enabled"})
-		return
-	}
-	if !s.verifyCloudOAuthState(c) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid or expired login attempt, please try again"})
-		return
-	}
-	code := c.Query("code")
-	if code == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing code parameter"})
-		return
-	}
-	ghCfg := getGitHubOAuthConfig()
-	oauth2Cfg := &oauth2.Config{
-		ClientID:     ghCfg.ClientID,
-		ClientSecret: ghCfg.ClientSecret,
-		Endpoint:     oauth2gh.Endpoint,
-		RedirectURL:  cfg.baseURL + "/api/v1/cloud/auth/github/callback",
-	}
-	token, err := oauth2Cfg.Exchange(c.Request.Context(), code)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to exchange code"})
-		return
-	}
-	client := github.NewClient(nil).WithAuthToken(token.AccessToken)
-	ghUser, _, err := client.Users.Get(c.Request.Context(), "")
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch GitHub profile"})
-		return
-	}
-	email := ghUser.GetEmail()
-	if email == "" {
-		// GitHub hides the primary email by default unless user:email scope
-		// AND a public/verified email exists; fall back to a stable address.
-		email = fmt.Sprintf("%d+%s@users.noreply.github.com", ghUser.GetID(), ghUser.GetLogin())
-	}
-	s.cloudCompleteSignup(c, email, ghUser.GetName(), ghUser.GetLogin(), ghUser.GetAvatarURL(), "github", fmt.Sprintf("%d", ghUser.GetID()))
-}
-
-// --- Google signup ---
 
 func (s *Server) cloudAuthGoogle(c *gin.Context) {
 	cfg := getCloudConfig()
