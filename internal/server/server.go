@@ -162,6 +162,7 @@ func New(cfg Config) (*Server, error) {
 	// /claim to accept the one-time handoff token from signup.
 	cloud := r.Group("/api/v1/cloud")
 	{
+		cloud.GET("/start", s.cloudStartPage)
 		cloud.GET("/auth/github", s.cloudAuthGitHub)
 		cloud.GET("/auth/google", s.cloudAuthGoogle)
 		cloud.GET("/auth/google/callback", s.cloudAuthGoogleCallback)
