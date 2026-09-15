@@ -38,6 +38,10 @@ type Server struct {
 	wsHub           *WSHub
 	githubApp       *GitHubApp
 	billing         *billingManager
+	// plan is this instance's RunRight Cloud subscription tier ("free" /
+	// "pro" / "enterprise"). Empty means unmetered — self-hosted deployments
+	// are never capped.
+	plan string
 	// SMTP config for email notifications
 	smtpHost string
 	smtpUser string
@@ -70,6 +74,9 @@ type Config struct {
 	StripeWebhookSecret   string
 	StripePricePro        string // Stripe Price ID for the "pro" plan
 	StripePriceEnterprise string // Stripe Price ID for the "enterprise" plan
+	// Plan is this instance's RunRight Cloud tier ("free"/"pro"/"enterprise").
+	// Empty means unmetered (self-hosted/reference deployments).
+	Plan string
 }
 
 // New creates a Server, runs migrations, and wires up routes.
@@ -98,6 +105,7 @@ func New(cfg Config) (*Server, error) {
 		smtpUser:        cfg.SMTPUser,
 		smtpPass:        cfg.SMTPPass,
 		smtpFrom:        cfg.SMTPFrom,
+		plan:            cfg.Plan,
 		wsHub:           NewWSHub(),
 	}
 	s.billing = newBillingManager(db, cfg)
@@ -223,6 +231,11 @@ func New(cfg Config) (*Server, error) {
 		v1.PUT("/user-settings", s.upsertUserSettings)
 		// Workspace branding (name shown in sidebar/login) — owner/admin only.
 		v1.PUT("/workspace", s.requirePermission(PermTeamManage), s.upsertWorkspaceSettings)
+		// Free-plan usage caps — read is open to any signed-in user; the quote
+		// request form is how customers ask us for pricing once they hit one.
+		v1.GET("/usage", s.getUsageSummary)
+		v1.POST("/quote-requests", s.createQuoteRequest)
+		v1.GET("/quote-requests", s.requirePermission(PermTeamManage), s.listQuoteRequests)
 		// Ownership routing.
 		v1.GET("/ownership", s.listOwnership)
 		v1.PUT("/ownership", s.requirePermission(PermOwnershipManage), s.upsertOwnership)
@@ -363,6 +376,16 @@ func (s *Server) createJob(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	if reason := s.planCapReason(c.Request.Context(), p.Summary.JobID, strings.TrimSpace(p.Summary.Repository)); reason != "" {
+		c.JSON(http.StatusPaymentRequired, gin.H{
+			"error":            "free plan limit reached",
+			"upgrade_required": true,
+			"cap":              reason,
+		})
+		return
+	}
+
 	summaryJSON, _ := json.Marshal(p.Summary)
 	recsJSON, _ := json.Marshal(p.Recommendations)
 
@@ -2597,5 +2620,6 @@ func ConfigFromEnv() Config {
 		StripeWebhookSecret:   os.Getenv("STRIPE_WEBHOOK_SECRET"),
 		StripePricePro:        os.Getenv("STRIPE_PRICE_PRO"),
 		StripePriceEnterprise: os.Getenv("STRIPE_PRICE_ENTERPRISE"),
+		Plan:                  os.Getenv("RUNRIGHT_PLAN"),
 	}
 }

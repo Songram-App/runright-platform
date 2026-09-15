@@ -17,16 +17,19 @@ import (
 // planLimits describes the usage caps for a subscription tier. A limit of 0
 // means unlimited.
 type planLimits struct {
-	Name       string
-	MaxMembers int
+	Name            string
+	MaxMembers      int
+	MaxJobsPerMonth int // distinct CI jobs analyzed per calendar month
+	MaxRepos        int // distinct repositories with at least one job
 }
 
 // plans is the fixed catalog of subscription tiers offered to customers.
-// "free" requires no Stripe price — it's the default for every new team.
+// "free" requires no Stripe price — it's the default for every new team, and
+// the default plan assigned to every new RunRight Cloud tenant on signup.
 var plans = map[string]planLimits{
-	"free":       {Name: "Free", MaxMembers: 3},
-	"pro":        {Name: "Pro", MaxMembers: 25},
-	"enterprise": {Name: "Enterprise", MaxMembers: 0},
+	"free":       {Name: "Free", MaxMembers: 3, MaxJobsPerMonth: 500, MaxRepos: 5},
+	"pro":        {Name: "Pro", MaxMembers: 25, MaxJobsPerMonth: 10000, MaxRepos: 50},
+	"enterprise": {Name: "Enterprise", MaxMembers: 0, MaxJobsPerMonth: 0, MaxRepos: 0},
 }
 
 // billingManager wires the Stripe SDK to team subscription state stored on the

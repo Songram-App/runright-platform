@@ -1,5 +1,6 @@
 import { useState, useEffect, type ReactNode } from 'react'
-import { fetchUserSettings, upsertUserSettings, fetchSSOConfigs, upsertSSOConfig, deleteSSOConfig, testSSOConfig, fetchUsers, updateUserRole, fetchRoles, createRole, updateRole, deleteRole, fetchWorkspaceSettings, updateWorkspaceSettings, type UserSettings } from '../api'
+import { fetchUserSettings, upsertUserSettings, fetchSSOConfigs, upsertSSOConfig, deleteSSOConfig, testSSOConfig, fetchUsers, updateUserRole, fetchRoles, createRole, updateRole, deleteRole, fetchWorkspaceSettings, updateWorkspaceSettings, fetchUsage, type UserSettings, type UsageSummary } from '../api'
+import { RequestQuoteModal } from '../components/RequestQuoteModal'
 import { CURRENCY_OPTIONS, type CurrencyCode, useCurrencyPreference } from '../currency'
 import type { SSOConfig, SSOProviderType, SSOUser, Role } from '../types'
 import { useUser } from '../App'
@@ -143,6 +144,9 @@ function GeneralTab() {
   const [workspaceSaved, setWorkspaceSaved] = useState(false)
   const [workspaceError, setWorkspaceError] = useState('')
 
+  const [usage, setUsage] = useState<UsageSummary | null>(null)
+  const [quoteOpen, setQuoteOpen] = useState(false)
+
   useEffect(() => {
     void (async () => {
       try {
@@ -157,6 +161,9 @@ function GeneralTab() {
     fetchWorkspaceSettings()
       .then(ws => setWorkspaceName(ws.name))
       .catch(() => { /* fall back to placeholder */ })
+    fetchUsage()
+      .then(setUsage)
+      .catch(() => { /* self-hosted or transient error — just hide the card */ })
   }, [])
 
   useEffect(() => {
@@ -212,6 +219,23 @@ function GeneralTab() {
           </div>
         </form>
       </Card>
+
+      {usage?.metered && (
+        <Card title="Usage This Month">
+          <div className="space-y-4">
+            <UsageBar label="CI jobs analyzed" value={usage.jobs_this_month ?? 0} max={usage.max_jobs_per_month ?? 0} />
+            <UsageBar label="Connected repositories" value={usage.repos_connected ?? 0} max={usage.max_repos ?? 0} />
+            <p className="text-sm text-[var(--text-mid)]">
+              You're on the <strong>{usage.plan_name ?? 'Free'}</strong> plan.{' '}
+              <button type="button" onClick={() => setQuoteOpen(true)} className="text-[var(--gold)] font-medium hover:underline">
+                Request a quote
+              </button>{' '}
+              to talk pricing for higher limits.
+            </p>
+          </div>
+          <RequestQuoteModal open={quoteOpen} reason="proactive" onClose={() => setQuoteOpen(false)} />
+        </Card>
+      )}
 
       <Card title="Preferences">
         <form onSubmit={e => void save(e)} className="space-y-5">
@@ -1436,6 +1460,28 @@ function FormGroup({ label, hint, children, className = '' }: { label: string; h
 
 function LoadingState() {
   return <div className="text-sm text-[var(--text-light)] py-8 text-center">Loading...</div>
+}
+
+function UsageBar({ label, value, max }: { label: string; value: number; max: number }) {
+  const unlimited = max <= 0
+  const pct = unlimited ? 0 : Math.min(100, Math.round((value / max) * 100))
+  const atCap = !unlimited && value >= max
+  return (
+    <div>
+      <div className="flex items-center justify-between text-xs text-[var(--text-mid)] mb-1">
+        <span>{label}</span>
+        <span>{unlimited ? `${value} (unlimited)` : `${value} / ${max}`}</span>
+      </div>
+      {!unlimited && (
+        <div className="h-2 rounded-full bg-[var(--border)] overflow-hidden">
+          <div
+            className={`h-full rounded-full ${atCap ? 'bg-[var(--red)]' : 'bg-[var(--gold)]'}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
+    </div>
+  )
 }
 
 function ErrorMessage({ message }: { message: string }) {

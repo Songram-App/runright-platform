@@ -18,6 +18,7 @@ import ReposPage from './pages/ReposPage'
 import RepoDetailPage from './pages/RepoDetailPage'
 import RunHistoryPage from './pages/RunHistoryPage'
 import ChatWidget from './components/ChatWidget'
+import { UsageCapBanner } from './components/UsageCapBanner'
 import { PageDataProvider } from './contexts/PageDataContext'
 import { logout, fetchCurrentUser, fetchWorkspaceSettings } from './api'
 import type { CurrentUser } from './types'
@@ -480,6 +481,7 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
           <span className="font-deco text-lg tracking-[2px] text-[var(--text)]">{workspaceName}</span>
         </div>
 
+        <UsageCapBanner />
         <Outlet />
       </main>
 

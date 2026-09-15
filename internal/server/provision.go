@@ -125,6 +125,10 @@ func (s *Server) provisionTenant(ctx context.Context, slug string) error {
 		"RUNRIGHT_SSO_ENABLED=true",
 		"RUNRIGHT_ALLOWED_ORIGINS=" + baseURL,
 		"CLOUD_CONTROL_PLANE_SECRET=" + cfg.controlPlaneSecret,
+		// Every new Cloud tenant starts on the free plan; caps are enforced
+		// locally on the tenant (see usage.go) and lifted manually via
+		// `fly secrets set RUNRIGHT_PLAN=pro` once a customer upgrades.
+		"RUNRIGHT_PLAN=free",
 		// Tenants can't register their own GitHub OAuth callback (GitHub Apps
 		// only support a small fixed list), so returning login routes
 		// through the control plane's one registered callback instead.

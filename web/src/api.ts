@@ -203,6 +203,34 @@ export const fetchWorkspaceSettings = (): Promise<WorkspaceSettings> =>
 export const updateWorkspaceSettings = (settings: WorkspaceSettings): Promise<WorkspaceSettings> =>
   api.put<WorkspaceSettings>('/workspace', settings).then((r) => r.data)
 
+// ── Free-plan usage caps + "request a quote" ────────────────────────────────
+
+export interface UsageSummary {
+  metered: boolean
+  plan?: string
+  plan_name?: string
+  jobs_this_month?: number
+  max_jobs_per_month?: number
+  repos_connected?: number
+  max_repos?: number
+  jobs_at_cap?: boolean
+  repos_at_cap?: boolean
+}
+
+export const fetchUsage = (): Promise<UsageSummary> =>
+  api.get<UsageSummary>('/usage').then((r) => r.data)
+
+export interface QuoteRequestInput {
+  name: string
+  email: string
+  company?: string
+  message?: string
+  reason?: 'jobs_per_month' | 'repos' | 'proactive'
+}
+
+export const submitQuoteRequest = (input: QuoteRequestInput): Promise<{ id: string; status: string }> =>
+  api.post('/quote-requests', input).then((r) => r.data)
+
 // Admin SSO config management
 export const fetchSSOConfigs = (): Promise<SSOConfig[]> =>
   api.get<{ configs: SSOConfig[] }>('/sso/configs').then((r) => r.data?.configs ?? [])
