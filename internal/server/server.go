@@ -37,6 +37,7 @@ type Server struct {
 	embeddings      *embeddings.Service
 	wsHub           *WSHub
 	githubApp       *GitHubApp
+	billing         *billingManager
 	// SMTP config for email notifications
 	smtpHost string
 	smtpUser string
@@ -55,15 +56,20 @@ type Config struct {
 	BaseURL         string // Base URL for SSO callbacks, e.g. https://runright.example.com
 	SSOEnabled      bool   // Enable SSO authentication
 	// SMTP config for email notifications
-	SMTPHost    string // SMTP server host:port, e.g. smtp.example.com:587
-	SMTPUser    string // SMTP username
-	SMTPPass    string // SMTP password
-	SMTPFrom    string // From address, e.g. alerts@runright.io
+	SMTPHost string // SMTP server host:port, e.g. smtp.example.com:587
+	SMTPUser string // SMTP username
+	SMTPPass string // SMTP password
+	SMTPFrom string // From address, e.g. alerts@runright.io
 	// RAG / Embeddings config
-	UseRAG           bool   // Enable RAG for AI assistant
-	EmbeddingURL     string // Ollama URL for embeddings, e.g. http://localhost:11434
-	EmbeddingModel   string // Model for embeddings, e.g. nomic-embed-text
-	EmbeddingAPIKey  string // API key for OpenAI embeddings (if using OpenAI instead of Ollama)
+	UseRAG          bool   // Enable RAG for AI assistant
+	EmbeddingURL    string // Ollama URL for embeddings, e.g. http://localhost:11434
+	EmbeddingModel  string // Model for embeddings, e.g. nomic-embed-text
+	EmbeddingAPIKey string // API key for OpenAI embeddings (if using OpenAI instead of Ollama)
+	// Stripe billing config — optional; billing endpoints respond "disabled" when unset.
+	StripeSecretKey       string
+	StripeWebhookSecret   string
+	StripePricePro        string // Stripe Price ID for the "pro" plan
+	StripePriceEnterprise string // Stripe Price ID for the "enterprise" plan
 }
 
 // New creates a Server, runs migrations, and wires up routes.
@@ -94,8 +100,7 @@ func New(cfg Config) (*Server, error) {
 		smtpFrom:        cfg.SMTPFrom,
 		wsHub:           NewWSHub(),
 	}
-
-	// Start WebSocket hub
+	s.billing = newBillingManager(db, cfg)
 	go s.wsHub.Run()
 
 	// Initialize SSO manager if enabled
@@ -141,9 +146,27 @@ func New(cfg Config) (*Server, error) {
 		gh.GET("/status", s.githubApp.GetAppStatus)
 	}
 
+	// RunRight Cloud signup — public. Handles both sides of the flow: the
+	// control-plane instance issues auth + provisions tenants, and every
+	// tenant instance (including this one, if it happens to be one) exposes
+	// /claim to accept the one-time handoff token from signup.
+	cloud := r.Group("/api/v1/cloud")
+	{
+		cloud.GET("/auth/github", s.cloudAuthGitHub)
+		cloud.GET("/auth/github/callback", s.cloudAuthGitHubCallback)
+		cloud.GET("/auth/google", s.cloudAuthGoogle)
+		cloud.GET("/auth/google/callback", s.cloudAuthGoogleCallback)
+		cloud.GET("/status", s.cloudTenantStatus)
+		cloud.GET("/wait", s.cloudWaitPage)
+		cloud.GET("/claim", s.cloudClaim)
+	}
+
 	// Auth endpoint — no middleware applied here.
 	r.POST("/api/v1/auth", authLogin(cfg.APIKey, cfg.DisableAuth))
 	r.POST("/api/v1/auth/logout", authLogout())
+
+	// Stripe webhook — no auth, verified via signature instead.
+	r.POST("/api/v1/billing/webhook", s.billing.HandleWebhook)
 
 	v1 := r.Group("/api/v1")
 	v1.Use(s.authMiddleware(cfg.APIKey, cfg.DisableAuth))
@@ -171,10 +194,10 @@ func New(cfg Config) (*Server, error) {
 		v1.POST("/policies/evaluate", s.evaluatePolicy)
 		// Repository-centric and job-management routes.
 		v1.GET("/repos", s.getRepos)
-		v1.GET("/repo-jobs", s.getRepoJobs)         // ?repository=owner%2Frepo
-		v1.GET("/isolated-jobs", s.getIsolatedJobs) // jobs without a repository
-		v1.PUT("/job-meta", s.requirePermission(PermJobsManage), s.upsertJobMeta)        // snooze / archive / stale_days
-		v1.DELETE("/job-runs", s.requirePermission(PermJobsManage), s.deleteJobRuns)     // hard-delete all runs for a job
+		v1.GET("/repo-jobs", s.getRepoJobs)                                          // ?repository=owner%2Frepo
+		v1.GET("/isolated-jobs", s.getIsolatedJobs)                                  // jobs without a repository
+		v1.PUT("/job-meta", s.requirePermission(PermJobsManage), s.upsertJobMeta)    // snooze / archive / stale_days
+		v1.DELETE("/job-runs", s.requirePermission(PermJobsManage), s.deleteJobRuns) // hard-delete all runs for a job
 		v1.GET("/notifications/settings", s.getNotificationSettings)
 		v1.PUT("/notifications/settings", s.requirePermission(PermAlertsManage), s.upsertNotificationSettings)
 		v1.POST("/notifications/test", s.sendNotificationTest)
@@ -203,9 +226,10 @@ func New(cfg Config) (*Server, error) {
 		v1.PUT("/teams/:teamId/members/:memberId", s.requirePermission(PermTeamManage), s.updateTeamMember)
 		v1.DELETE("/teams/:teamId/members/:memberId", s.requirePermission(PermTeamManage), s.removeTeamMember)
 
-		// API Keys Management
-		v1.GET("/api-keys", s.listAPIKeys)
-		v1.POST("/api-keys", s.requirePermission(PermAPIKeysManage), s.createAPIKey)
+		// Billing (Stripe) — read is open to team members, mutations require billing:manage.
+		v1.GET("/teams/:teamId/billing", s.getTeamBilling)
+		v1.POST("/teams/:teamId/billing/checkout", s.requirePermission(PermBillingManage), s.createBillingCheckout)
+		v1.POST("/teams/:teamId/billing/portal", s.requirePermission(PermBillingManage), s.createBillingPortal)
 		v1.DELETE("/api-keys/:keyId", s.requirePermission(PermAPIKeysManage), s.revokeAPIKey)
 
 		// Audit Logs
@@ -855,11 +879,11 @@ type teamsDestination struct {
 
 // webhookDestination is a generic HTTP POST destination.
 type webhookDestination struct {
-	ID         string            `json:"id"`
-	Name       string            `json:"name"`
-	URL        string            `json:"url"`
-	HasSecret  bool              `json:"has_secret,omitempty"`
-	Headers    map[string]string `json:"headers,omitempty"`
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	URL       string            `json:"url"`
+	HasSecret bool              `json:"has_secret,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
 }
 
 type slackNotificationSettings struct {
@@ -879,7 +903,7 @@ type emailNotificationSettings struct {
 type notificationSettings struct {
 	Enabled  bool                      `json:"enabled"`
 	Events   notificationEvents        `json:"events"`
-	Slack    slackNotificationSettings  `json:"slack"`
+	Slack    slackNotificationSettings `json:"slack"`
 	Teams    teamsSettings             `json:"teams"`
 	Webhooks webhooksSettings          `json:"webhooks"`
 	Rules    []notificationAlertRule   `json:"rules"`
@@ -1253,8 +1277,8 @@ func validateNotificationRuleSchema(settings *notificationSettings) error {
 		"daily_summary":    {},
 	}
 	validMetrics := map[string]struct{}{
-		"max_cost_per_hour":           {},
-		"waste_percent":               {},
+		"max_cost_per_hour":            {},
+		"waste_percent":                {},
 		"monthly_savings_drop_percent": {},
 	}
 
@@ -2531,21 +2555,25 @@ func ConfigFromEnv() Config {
 	ssoEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("RUNRIGHT_SSO_ENABLED")), "true")
 	useRAG := strings.EqualFold(strings.TrimSpace(os.Getenv("RUNRIGHT_USE_RAG")), "true")
 	return Config{
-		Port:            port,
-		DSN:             dsn,
-		APIKey:          os.Getenv("RUNRIGHT_API_KEY"),
-		DisableAuth:     disableAuth,
-		SlackWebhook:    os.Getenv("RUNRIGHT_SLACK_WEBHOOK"),
-		AlertWebhookURL: os.Getenv("RUNRIGHT_ALERT_WEBHOOK"),
-		BaseURL:         os.Getenv("RUNRIGHT_BASE_URL"),
-		SSOEnabled:      ssoEnabled,
-		SMTPHost:        os.Getenv("RUNRIGHT_SMTP_HOST"),
-		SMTPUser:        os.Getenv("RUNRIGHT_SMTP_USER"),
-		SMTPPass:        os.Getenv("RUNRIGHT_SMTP_PASS"),
-		SMTPFrom:        os.Getenv("RUNRIGHT_SMTP_FROM"),
-		UseRAG:          useRAG,
-		EmbeddingURL:    os.Getenv("RUNRIGHT_EMBEDDING_URL"),
-		EmbeddingModel:  os.Getenv("RUNRIGHT_EMBEDDING_MODEL"),
-		EmbeddingAPIKey: os.Getenv("RUNRIGHT_EMBEDDING_API_KEY"),
+		Port:                  port,
+		DSN:                   dsn,
+		APIKey:                os.Getenv("RUNRIGHT_API_KEY"),
+		DisableAuth:           disableAuth,
+		SlackWebhook:          os.Getenv("RUNRIGHT_SLACK_WEBHOOK"),
+		AlertWebhookURL:       os.Getenv("RUNRIGHT_ALERT_WEBHOOK"),
+		BaseURL:               os.Getenv("RUNRIGHT_BASE_URL"),
+		SSOEnabled:            ssoEnabled,
+		SMTPHost:              os.Getenv("RUNRIGHT_SMTP_HOST"),
+		SMTPUser:              os.Getenv("RUNRIGHT_SMTP_USER"),
+		SMTPPass:              os.Getenv("RUNRIGHT_SMTP_PASS"),
+		SMTPFrom:              os.Getenv("RUNRIGHT_SMTP_FROM"),
+		UseRAG:                useRAG,
+		EmbeddingURL:          os.Getenv("RUNRIGHT_EMBEDDING_URL"),
+		EmbeddingModel:        os.Getenv("RUNRIGHT_EMBEDDING_MODEL"),
+		EmbeddingAPIKey:       os.Getenv("RUNRIGHT_EMBEDDING_API_KEY"),
+		StripeSecretKey:       os.Getenv("STRIPE_SECRET_KEY"),
+		StripeWebhookSecret:   os.Getenv("STRIPE_WEBHOOK_SECRET"),
+		StripePricePro:        os.Getenv("STRIPE_PRICE_PRO"),
+		StripePriceEnterprise: os.Getenv("STRIPE_PRICE_ENTERPRISE"),
 	}
 }

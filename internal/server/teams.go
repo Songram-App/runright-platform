@@ -14,17 +14,17 @@ import (
 
 // Team represents an organization/team.
 type Team struct {
-	ID           string                 `json:"id"`
-	Name         string                 `json:"name"`
-	Slug         string                 `json:"slug"`
-	Description  string                 `json:"description,omitempty"`
-	AvatarURL    string                 `json:"avatar_url,omitempty"`
-	BillingEmail string                 `json:"billing_email,omitempty"`
-	Plan         string                 `json:"plan"`
+	ID           string         `json:"id"`
+	Name         string         `json:"name"`
+	Slug         string         `json:"slug"`
+	Description  string         `json:"description,omitempty"`
+	AvatarURL    string         `json:"avatar_url,omitempty"`
+	BillingEmail string         `json:"billing_email,omitempty"`
+	Plan         string         `json:"plan"`
 	Settings     map[string]any `json:"settings,omitempty"`
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
-	MemberCount  int                    `json:"member_count,omitempty"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	MemberCount  int            `json:"member_count,omitempty"`
 }
 
 // TeamMember represents a member of a team.
@@ -178,11 +178,11 @@ func (s *Server) updateTeam(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	var body struct {
-		Name         *string                 `json:"name"`
-		Description  *string                 `json:"description"`
-		AvatarURL    *string                 `json:"avatar_url"`
-		BillingEmail *string                 `json:"billing_email"`
-		Settings     map[string]any  `json:"settings"`
+		Name         *string        `json:"name"`
+		Description  *string        `json:"description"`
+		AvatarURL    *string        `json:"avatar_url"`
+		BillingEmail *string        `json:"billing_email"`
+		Settings     map[string]any `json:"settings"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -280,6 +280,21 @@ func (s *Server) inviteTeamMember(c *gin.Context) {
 
 	if body.Role == "" {
 		body.Role = "member"
+	}
+
+	// Enforce plan seat limits before creating the invitation.
+	var plan string
+	var memberCount int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT t.plan, (SELECT COUNT(*) FROM team_members WHERE team_id = t.id)
+		FROM teams t WHERE t.id = $1
+	`, teamID).Scan(&plan, &memberCount); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "team not found"})
+		return
+	}
+	if !checkMemberLimit(plan, memberCount) {
+		c.JSON(http.StatusPaymentRequired, gin.H{"error": "member limit reached for the " + plan + " plan — upgrade to invite more people"})
+		return
 	}
 
 	// Generate invitation token

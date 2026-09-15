@@ -1,5 +1,12 @@
 # Fly.io configuration for RunRight Dashboard (Frontend)
 # Deploy with: cd web && fly deploy
+#
+# Custom domain setup (once):
+#   fly certs create app.runright.dev --app runright-app
+#   # then add a CNAME record: app.runright.dev -> runright-app.fly.dev
+#
+# Until the api.runright.dev cert/DNS are live, point BACKEND_ORIGIN at the
+# backend's fly.dev URL instead so the app keeps working.
 
 app = "runright-app"
 primary_region = "iad"
@@ -9,6 +16,7 @@ primary_region = "iad"
 
 [env]
   NODE_ENV = "production"
+  BACKEND_ORIGIN = "https://api.runright.dev"
 
 [http_service]
   internal_port = 80

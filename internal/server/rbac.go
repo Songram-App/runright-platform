@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -21,6 +22,7 @@ const (
 	PermAPIKeysManage   = "apikeys:manage"
 	PermReportsManage   = "reports:manage"
 	PermAuditView       = "audit:view"
+	PermBillingManage   = "billing:manage"
 )
 
 // allPermissions is the complete list of named permissions the system knows about.
@@ -34,6 +36,46 @@ var allPermissions = []string{
 	PermAPIKeysManage,
 	PermReportsManage,
 	PermAuditView,
+	PermBillingManage,
+}
+
+// anyTeamRole lists every team-scoped role, used where a route just requires
+// the caller to be *some* member of the team (e.g. viewing team details).
+var anyTeamRole = []string{"viewer", "member", "developer", "billing", "admin", "owner"}
+
+// requireTeamRole returns middleware that ensures the caller is a member of the
+// team identified by the :teamId route param with one of allowedRoles (owner is
+// always allowed). Unlike requirePermission — which checks a user's *global*
+// role — this checks membership in the *specific* team being accessed, which is
+// required to prevent one tenant's user from reading or modifying another
+// tenant's team by guessing/enumerating team IDs.
+func (s *Server) requireTeamRole(allowedRoles ...string) gin.HandlerFunc {
+	allowed := map[string]bool{"owner": true}
+	for _, r := range allowedRoles {
+		allowed[r] = true
+	}
+	return func(c *gin.Context) {
+		email := getUserEmail(c)
+		// Static API key / dev-bypass operator → full access (self-hosted single-tenant mode).
+		if email == "system" || email == "" || email == "dev@runright.io" {
+			c.Next()
+			return
+		}
+		teamID := c.Param("teamId")
+		var role string
+		err := s.db.QueryRowContext(c.Request.Context(),
+			`SELECT role FROM team_members WHERE team_id = $1 AND user_email = $2`, teamID, email).Scan(&role)
+		switch {
+		case err == sql.ErrNoRows:
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "team not found"})
+		case err != nil:
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to verify team membership"})
+		case !allowed[role]:
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient team role"})
+		default:
+			c.Next()
+		}
+	}
 }
 
 // Role is the API representation of a role record.
@@ -290,5 +332,3 @@ func isUniqueViolation(err error) bool {
 	}
 	return strings.Contains(err.Error(), "23505") || strings.Contains(err.Error(), "unique")
 }
-
-

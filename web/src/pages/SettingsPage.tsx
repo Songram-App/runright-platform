@@ -43,6 +43,18 @@ interface TeamMember {
   invited_at?: string
 }
 
+interface TeamBilling {
+  plan: string
+  plan_name: string
+  subscription_status: string
+  cancel_at_period_end: boolean
+  member_count: number
+  max_members: number
+  billing_enabled: boolean
+  has_payment_method: boolean
+  current_period_end?: string
+}
+
 // Tab IDs
 type TabId = 'general' | 'sso' | 'api-keys' | 'team' | 'users' | 'roles' | 'audit'
 
@@ -541,6 +553,10 @@ function TeamTab() {
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState('member')
   const [inviting, setInviting] = useState(false)
+  const [billing, setBilling] = useState<TeamBilling | null>(null)
+  const [checkoutPlan, setCheckoutPlan] = useState<string | null>(null)
+  const [portalLoading, setPortalLoading] = useState(false)
+  const [billingError, setBillingError] = useState('')
 
   useEffect(() => {
     loadTeams()
@@ -586,6 +602,57 @@ function TeamTab() {
       setMembers([])
     } finally {
       setLoadingMembers(false)
+    }
+    loadBilling(team.id)
+  }
+
+  async function loadBilling(teamId: string) {
+    try {
+      const res = await fetch(`/api/v1/teams/${teamId}/billing`, { credentials: 'include' })
+      if (!res.ok) { setBilling(null); return }
+      setBilling(await res.json())
+    } catch {
+      setBilling(null)
+    }
+  }
+
+  async function upgradePlan(plan: string) {
+    if (!selectedTeam) return
+    setBillingError('')
+    setCheckoutPlan(plan)
+    try {
+      const res = await fetch(`/api/v1/teams/${selectedTeam.id}/billing/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ plan }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setBillingError(data.error || 'Failed to start checkout'); return }
+      window.location.href = data.checkout_url
+    } catch {
+      setBillingError('Failed to start checkout')
+    } finally {
+      setCheckoutPlan(null)
+    }
+  }
+
+  async function manageBilling() {
+    if (!selectedTeam) return
+    setBillingError('')
+    setPortalLoading(true)
+    try {
+      const res = await fetch(`/api/v1/teams/${selectedTeam.id}/billing/portal`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = await res.json()
+      if (!res.ok) { setBillingError(data.error || 'Failed to open billing portal'); return }
+      window.location.href = data.portal_url
+    } catch {
+      setBillingError('Failed to open billing portal')
+    } finally {
+      setPortalLoading(false)
     }
   }
 
@@ -705,6 +772,59 @@ function TeamTab() {
               )}
             </div>
           </div>
+        </Card>
+
+        {/* Billing */}
+        <Card title="Billing">
+          {billingError && (
+            <div className="mb-4 text-sm text-red-600">{billingError}</div>
+          )}
+          {!billing ? (
+            <div className="text-sm text-[var(--text-light)] py-2">Loading billing info...</div>
+          ) : !billing.billing_enabled ? (
+            <div className="text-sm text-[var(--text-light)]">
+              Billing isn't configured on this deployment. Everyone is on the {billing.plan_name} plan.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-medium text-[var(--text)]">{billing.plan_name} plan</div>
+                  <div className="text-xs text-[var(--text-light)]">
+                    {billing.member_count}{billing.max_members > 0 ? ` / ${billing.max_members}` : ''} members
+                    {' · '}
+                    {billing.subscription_status}
+                    {billing.cancel_at_period_end ? ' (cancels at period end)' : ''}
+                  </div>
+                </div>
+                {billing.has_payment_method && (
+                  <button
+                    onClick={manageBilling}
+                    disabled={portalLoading}
+                    className="settings-btn-secondary"
+                  >
+                    {portalLoading ? 'Opening...' : 'Manage billing'}
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {(['pro', 'enterprise'] as const)
+                  .filter(plan => plan !== billing.plan)
+                  .map(plan => (
+                    <div key={plan} className="border border-[var(--border)] rounded-lg p-4 flex items-center justify-between">
+                      <div className="text-sm font-medium text-[var(--text)] capitalize">{plan}</div>
+                      <button
+                        onClick={() => upgradePlan(plan)}
+                        disabled={checkoutPlan === plan}
+                        className="settings-btn-primary text-sm"
+                      >
+                        {checkoutPlan === plan ? 'Redirecting...' : 'Upgrade'}
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
         </Card>
       </div>
     )
