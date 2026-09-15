@@ -1,5 +1,5 @@
 import { useState, useEffect, type ReactNode } from 'react'
-import { fetchUserSettings, upsertUserSettings, fetchSSOConfigs, upsertSSOConfig, deleteSSOConfig, testSSOConfig, fetchUsers, updateUserRole, fetchRoles, createRole, updateRole, deleteRole, type UserSettings } from '../api'
+import { fetchUserSettings, upsertUserSettings, fetchSSOConfigs, upsertSSOConfig, deleteSSOConfig, testSSOConfig, fetchUsers, updateUserRole, fetchRoles, createRole, updateRole, deleteRole, fetchWorkspaceSettings, updateWorkspaceSettings, type UserSettings } from '../api'
 import { CURRENCY_OPTIONS, type CurrencyCode, useCurrencyPreference } from '../currency'
 import type { SSOConfig, SSOProviderType, SSOUser, Role } from '../types'
 import { useUser } from '../App'
@@ -126,6 +126,7 @@ export default function SettingsPage() {
 
 // === General Settings Tab ===
 function GeneralTab() {
+  const { can } = useUser()
   const { currency, setCurrency } = useCurrencyPreference()
   const [settings, setSettings] = useState<UserSettings>({
     otel_endpoint: '',
@@ -138,6 +139,10 @@ function GeneralTab() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
 
+  const [workspaceName, setWorkspaceName] = useState('')
+  const [workspaceSaved, setWorkspaceSaved] = useState(false)
+  const [workspaceError, setWorkspaceError] = useState('')
+
   useEffect(() => {
     void (async () => {
       try {
@@ -149,6 +154,9 @@ function GeneralTab() {
         setLoading(false)
       }
     })()
+    fetchWorkspaceSettings()
+      .then(ws => setWorkspaceName(ws.name))
+      .catch(() => { /* fall back to placeholder */ })
   }, [])
 
   useEffect(() => {
@@ -168,10 +176,43 @@ function GeneralTab() {
     }
   }
 
+  async function saveWorkspaceName(e: React.FormEvent) {
+    e.preventDefault()
+    setWorkspaceError('')
+    try {
+      await updateWorkspaceSettings({ name: workspaceName })
+      setWorkspaceSaved(true)
+      setTimeout(() => setWorkspaceSaved(false), 2500)
+    } catch {
+      setWorkspaceError('Unable to save workspace name.')
+    }
+  }
+
   if (loading) return <LoadingState />
 
   return (
     <div className="space-y-6">
+      <Card title="Workspace">
+        <form onSubmit={e => void saveWorkspaceName(e)} className="space-y-5">
+          <FormGroup label="Workspace Name" hint="Shown in the sidebar and on the login screen — make this instance feel like yours">
+            <input
+              type="text"
+              className="settings-input"
+              placeholder="RunRight"
+              maxLength={60}
+              value={workspaceName}
+              disabled={!can('team:manage')}
+              onChange={e => setWorkspaceName(e.target.value)}
+            />
+          </FormGroup>
+          {workspaceError && <ErrorMessage message={workspaceError} />}
+          <div className="flex items-center gap-4">
+            <button type="submit" className="settings-btn-primary" disabled={!can('team:manage')}>Save Name</button>
+            {workspaceSaved && <span className="text-sm text-green-600 dark:text-green-400">Saved!</span>}
+          </div>
+        </form>
+      </Card>
+
       <Card title="Preferences">
         <form onSubmit={e => void save(e)} className="space-y-5">
           <FormGroup label="Display Currency" hint="Affects all dashboard money values">

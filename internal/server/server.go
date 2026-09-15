@@ -144,6 +144,10 @@ func New(cfg Config) (*Server, error) {
 		sso.POST("/logout", s.ssoLogout)
 	}
 
+	// Workspace branding — public read (the login screen needs it before
+	// anyone's signed in); mutation happens in the authenticated v1 group below.
+	r.GET("/api/v1/workspace", s.getWorkspaceSettings)
+
 	// GitHub App — initialize and register routes
 	s.githubApp = NewGitHubApp(db, s)
 	gh := r.Group("/api/v1/github")
@@ -217,6 +221,8 @@ func New(cfg Config) (*Server, error) {
 		// User settings
 		v1.GET("/user-settings", s.getUserSettings)
 		v1.PUT("/user-settings", s.upsertUserSettings)
+		// Workspace branding (name shown in sidebar/login) — owner/admin only.
+		v1.PUT("/workspace", s.requirePermission(PermTeamManage), s.upsertWorkspaceSettings)
 		// Ownership routing.
 		v1.GET("/ownership", s.listOwnership)
 		v1.PUT("/ownership", s.requirePermission(PermOwnershipManage), s.upsertOwnership)

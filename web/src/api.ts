@@ -190,6 +190,19 @@ export interface GitHubAppStatus {
 export const fetchGitHubStatus = (): Promise<GitHubAppStatus> =>
   api.get<GitHubAppStatus>('/github/status').then((r) => r.data)
 
+// ── Workspace branding (instance name shown in sidebar/login) ───────────────
+
+export interface WorkspaceSettings {
+  name: string
+  accent_color?: string
+}
+
+export const fetchWorkspaceSettings = (): Promise<WorkspaceSettings> =>
+  api.get<WorkspaceSettings>('/workspace').then((r) => r.data)
+
+export const updateWorkspaceSettings = (settings: WorkspaceSettings): Promise<WorkspaceSettings> =>
+  api.put<WorkspaceSettings>('/workspace', settings).then((r) => r.data)
+
 // Admin SSO config management
 export const fetchSSOConfigs = (): Promise<SSOConfig[]> =>
   api.get<{ configs: SSOConfig[] }>('/sso/configs').then((r) => r.data?.configs ?? [])

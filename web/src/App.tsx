@@ -19,7 +19,7 @@ import RepoDetailPage from './pages/RepoDetailPage'
 import RunHistoryPage from './pages/RunHistoryPage'
 import ChatWidget from './components/ChatWidget'
 import { PageDataProvider } from './contexts/PageDataContext'
-import { logout, fetchCurrentUser } from './api'
+import { logout, fetchCurrentUser, fetchWorkspaceSettings } from './api'
 import type { CurrentUser } from './types'
 import LogoMark from './components/LogoMark'
 import './App.css'
@@ -371,6 +371,13 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
   )
   // On desktop the sidebar is always "open"; on mobile it's a drawer.
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [workspaceName, setWorkspaceName] = useState('RUNRIGHT')
+
+  useEffect(() => {
+    fetchWorkspaceSettings()
+      .then(ws => { if (ws.name) setWorkspaceName(ws.name.toUpperCase()) })
+      .catch(() => { /* keep default branding */ })
+  }, [])
 
   // Sync dark-mode class to <html> so Tailwind dark: variants work
   useEffect(() => {
@@ -432,7 +439,7 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
           aria-label="RunRight home"
         >
           <LogoMark size={22} color="#FBF0DC" />
-          <span className={["font-deco text-[22px] text-[var(--sidebar-fg)] tracking-[3px] leading-tight", desktopCollapsed ? 'md:hidden' : ''].join(' ')}>RUNRIGHT</span>
+          <span className={["font-deco text-[22px] text-[var(--sidebar-fg)] tracking-[3px] leading-tight", desktopCollapsed ? 'md:hidden' : ''].join(' ')}>{workspaceName}</span>
         </Link>
 
         <SideLink to="/app" end onClick={closeMobile} collapsed={desktopCollapsed} icon={JobsIcon}>Jobs</SideLink>
@@ -470,7 +477,7 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
           >
             {mobileOpen ? <CloseIcon /> : <MenuIcon />}
           </button>
-          <span className="font-deco text-lg tracking-[2px] text-[var(--text)]">RUNRIGHT</span>
+          <span className="font-deco text-lg tracking-[2px] text-[var(--text)]">{workspaceName}</span>
         </div>
 
         <Outlet />

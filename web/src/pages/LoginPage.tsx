@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { login, fetchSSOProviders, fetchGitHubStatus } from '../api'
+import { login, fetchSSOProviders, fetchGitHubStatus, fetchWorkspaceSettings } from '../api'
 import type { SSOProvider } from '../types'
 import LogoMark from '../components/LogoMark'
 
@@ -75,6 +75,7 @@ export default function LoginPage({ onLogin }: Props) {
   const [ssoProviders, setSSOProviders] = useState<SSOProvider[]>([])
   const [loadingSSO, setLoadingSSO] = useState(true)
   const [githubEnabled, setGithubEnabled] = useState(false)
+  const [workspaceName, setWorkspaceName] = useState('RUNRIGHT')
   const [dark, setDark] = useState(() =>
     typeof window !== 'undefined' ? localStorage.getItem('rr-theme') === 'dark' : false
   )
@@ -100,6 +101,12 @@ export default function LoginPage({ onLogin }: Props) {
     fetchGitHubStatus()
       .then(s => setGithubEnabled(s.configured))
       .catch(() => setGithubEnabled(false))
+  }, [])
+
+  useEffect(() => {
+    fetchWorkspaceSettings()
+      .then(ws => { if (ws.name) setWorkspaceName(ws.name.toUpperCase()) })
+      .catch(() => { /* keep default branding */ })
   }, [])
 
   async function handleSubmit(e: React.FormEvent) {
@@ -161,7 +168,7 @@ export default function LoginPage({ onLogin }: Props) {
           {/* Logo */}
           <div className="flex flex-col items-center mb-8">
             <LogoMark size={36} color="currentColor" />
-            <div className="font-deco text-[22px] tracking-[4px] mt-2">RUNRIGHT</div>
+            <div className="font-deco text-[22px] tracking-[4px] mt-2">{workspaceName}</div>
           </div>
 
           {/* Single SSO Button */}

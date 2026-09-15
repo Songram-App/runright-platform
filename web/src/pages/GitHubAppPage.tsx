@@ -127,15 +127,34 @@ interface Repo {
 }
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
+// Raw fetch() never times out on its own — a cold-starting Machine or a
+// stuck connection would otherwise spin the loading state forever with no
+// feedback. Every call below aborts and surfaces a real error after 12s.
+const FETCH_TIMEOUT_MS = 12_000
+
+async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('Request timed out — the server took too long to respond.')
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 async function fetchAppStatus(): Promise<AppStatus> {
-  const res = await fetch(`${API_BASE}/api/v1/github/status`)
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/github/status`)
   if (!res.ok) throw new Error('Failed to fetch app status')
   return res.json()
 }
 
 async function fetchInstallations(): Promise<Installation[]> {
-  const res = await fetch(`${API_BASE}/api/v1/github/installations`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/github/installations`, {
     credentials: 'include',
   })
   if (!res.ok) throw new Error('Failed to fetch installations')
@@ -143,7 +162,7 @@ async function fetchInstallations(): Promise<Installation[]> {
 }
 
 async function fetchInstallationRepos(installationId: number): Promise<Repo[]> {
-  const res = await fetch(`${API_BASE}/api/v1/github/installations/${installationId}/repos`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/github/installations/${installationId}/repos`, {
     credentials: 'include',
   })
   if (!res.ok) throw new Error('Failed to fetch repos')
@@ -154,13 +173,13 @@ async function fetchWorkflowRuns(repo?: string): Promise<WorkflowRun[]> {
   const url = repo 
     ? `${API_BASE}/api/v1/github/workflow-runs?repository=${encodeURIComponent(repo)}`
     : `${API_BASE}/api/v1/github/workflow-runs`
-  const res = await fetch(url, { credentials: 'include' })
+  const res = await fetchWithTimeout(url, { credentials: 'include' })
   if (!res.ok) throw new Error('Failed to fetch workflow runs')
   return res.json()
 }
 
 async function injectWorkflow(repository: string): Promise<{ pr_url: string; pr_number: number }> {
-  const res = await fetch(`${API_BASE}/api/v1/github/inject-workflow`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/github/inject-workflow`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -200,7 +219,7 @@ export default function GitHubAppPage() {
       setInstallations(installs || [])
       setRuns(workflowRuns || [])
     } catch (err) {
-      setError('Failed to load data')
+      setError(err instanceof Error ? err.message : 'Failed to load GitHub App data')
       console.error(err)
     }
     setLoading(false)
@@ -248,8 +267,9 @@ export default function GitHubAppPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex flex-col items-center justify-center h-64 gap-3">
         <RefreshCwIcon className="w-8 h-8 animate-spin text-blue-500" />
+        <p className="text-sm text-gray-500 dark:text-gray-400">Loading GitHub App status&hellip;</p>
       </div>
     )
   }
@@ -276,8 +296,14 @@ export default function GitHubAppPage() {
       </div>
 
       {error && (
-        <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg">
-          {error}
+        <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg flex items-center justify-between gap-4">
+          <span>{error}</span>
+          <button
+            onClick={loadData}
+            className="shrink-0 px-3 py-1.5 text-sm font-medium bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+          >
+            Retry
+          </button>
         </div>
       )}
 
