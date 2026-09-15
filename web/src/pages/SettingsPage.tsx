@@ -1,5 +1,5 @@
 import { useState, useEffect, type ReactNode } from 'react'
-import { fetchUserSettings, upsertUserSettings, fetchSSOConfigs, upsertSSOConfig, deleteSSOConfig, testSSOConfig, fetchUsers, updateUserRole, fetchRoles, createRole, updateRole, deleteRole, fetchWorkspaceSettings, updateWorkspaceSettings, fetchUsage, type UserSettings, type UsageSummary } from '../api'
+import { fetchUserSettings, upsertUserSettings, fetchSSOConfigs, upsertSSOConfig, deleteSSOConfig, testSSOConfig, fetchUsers, updateUserRole, fetchRoles, createRole, updateRole, deleteRole, fetchWorkspaceSettings, updateWorkspaceSettings, fetchUsage, fetchAISettings, updateAISettings, deleteAISettings, type UserSettings, type UsageSummary, type AISettings } from '../api'
 import { RequestQuoteModal } from '../components/RequestQuoteModal'
 import { CURRENCY_OPTIONS, type CurrencyCode, useCurrencyPreference } from '../currency'
 import type { SSOConfig, SSOProviderType, SSOUser, Role } from '../types'
@@ -141,11 +141,20 @@ function GeneralTab() {
   const [loading, setLoading] = useState(true)
 
   const [workspaceName, setWorkspaceName] = useState('')
+  const [accentColor, setAccentColor] = useState('')
   const [workspaceSaved, setWorkspaceSaved] = useState(false)
   const [workspaceError, setWorkspaceError] = useState('')
 
   const [usage, setUsage] = useState<UsageSummary | null>(null)
   const [quoteOpen, setQuoteOpen] = useState(false)
+
+  const [aiSettings, setAiSettings] = useState<AISettings | null>(null)
+  const [aiProvider, setAiProvider] = useState<'' | 'openai' | 'anthropic' | 'ollama'>('')
+  const [aiApiKey, setAiApiKey] = useState('')
+  const [aiBaseURL, setAiBaseURL] = useState('')
+  const [aiModel, setAiModel] = useState('')
+  const [aiSaved, setAiSaved] = useState(false)
+  const [aiError, setAiError] = useState('')
 
   useEffect(() => {
     void (async () => {
@@ -159,11 +168,21 @@ function GeneralTab() {
       }
     })()
     fetchWorkspaceSettings()
-      .then(ws => setWorkspaceName(ws.name))
+      .then(ws => { setWorkspaceName(ws.name); setAccentColor(ws.accent_color ?? '') })
       .catch(() => { /* fall back to placeholder */ })
     fetchUsage()
       .then(setUsage)
       .catch(() => { /* self-hosted or transient error — just hide the card */ })
+    if (can('team:manage')) {
+      fetchAISettings()
+        .then(ai => {
+          setAiSettings(ai)
+          setAiProvider(ai.provider || '')
+          setAiBaseURL(ai.base_url ?? '')
+          setAiModel(ai.model ?? '')
+        })
+        .catch(() => { /* leave the card blank on error */ })
+    }
   }, [])
 
   useEffect(() => {
@@ -187,11 +206,43 @@ function GeneralTab() {
     e.preventDefault()
     setWorkspaceError('')
     try {
-      await updateWorkspaceSettings({ name: workspaceName })
+      await updateWorkspaceSettings({ name: workspaceName, accent_color: accentColor })
       setWorkspaceSaved(true)
       setTimeout(() => setWorkspaceSaved(false), 2500)
     } catch {
       setWorkspaceError('Unable to save workspace name.')
+    }
+  }
+
+  async function saveAISettings(e: React.FormEvent) {
+    e.preventDefault()
+    setAiError('')
+    if (!aiProvider) {
+      setAiError('Choose a provider.')
+      return
+    }
+    try {
+      await updateAISettings({ provider: aiProvider, api_key: aiApiKey, base_url: aiBaseURL, model: aiModel })
+      setAiApiKey('')
+      setAiSettings(await fetchAISettings())
+      setAiSaved(true)
+      setTimeout(() => setAiSaved(false), 2500)
+    } catch {
+      setAiError('Unable to save AI settings.')
+    }
+  }
+
+  async function clearAISettings() {
+    setAiError('')
+    try {
+      await deleteAISettings()
+      setAiProvider('')
+      setAiApiKey('')
+      setAiBaseURL('')
+      setAiModel('')
+      setAiSettings(await fetchAISettings())
+    } catch {
+      setAiError('Unable to clear AI settings.')
     }
   }
 
@@ -211,6 +262,25 @@ function GeneralTab() {
               disabled={!can('team:manage')}
               onChange={e => setWorkspaceName(e.target.value)}
             />
+          </FormGroup>
+          <FormGroup label="Accent Color" hint="Optional brand color (used in future theming)">
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                value={accentColor || '#c9a227'}
+                disabled={!can('team:manage')}
+                onChange={e => setAccentColor(e.target.value)}
+                className="w-10 h-10 rounded border border-[var(--border)] bg-transparent cursor-pointer disabled:cursor-not-allowed"
+              />
+              <input
+                type="text"
+                className="settings-input flex-1"
+                placeholder="#c9a227"
+                value={accentColor}
+                disabled={!can('team:manage')}
+                onChange={e => setAccentColor(e.target.value)}
+              />
+            </div>
           </FormGroup>
           {workspaceError && <ErrorMessage message={workspaceError} />}
           <div className="flex items-center gap-4">
@@ -234,6 +304,76 @@ function GeneralTab() {
             </p>
           </div>
           <RequestQuoteModal open={quoteOpen} reason="proactive" onClose={() => setQuoteOpen(false)} />
+        </Card>
+      )}
+
+      {can('team:manage') && (
+        <Card title="AI Assistant">
+          <form onSubmit={e => void saveAISettings(e)} className="space-y-5">
+            <p className="text-sm text-[var(--text-mid)] -mt-1">
+              Connect an AI provider so the dashboard's assistant can answer questions about your CI/CD costs.
+              API keys are encrypted at rest and never shown again once saved.
+            </p>
+            <FormGroup label="Provider">
+              <select
+                className="settings-select"
+                value={aiProvider}
+                onChange={e => setAiProvider(e.target.value as typeof aiProvider)}
+              >
+                <option value="">Not connected</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="ollama">Ollama (self-hosted)</option>
+              </select>
+            </FormGroup>
+            {aiProvider && aiProvider !== 'ollama' && (
+              <FormGroup
+                label="API Key"
+                hint={aiSettings?.api_key_set ? 'A key is already saved — leave blank to keep it, or enter a new one to replace it.' : undefined}
+              >
+                <input
+                  type="password"
+                  className="settings-input"
+                  placeholder={aiSettings?.api_key_set ? '••••••••••••••••' : 'sk-...'}
+                  autoComplete="off"
+                  value={aiApiKey}
+                  onChange={e => setAiApiKey(e.target.value)}
+                />
+              </FormGroup>
+            )}
+            {aiProvider === 'ollama' && (
+              <FormGroup label="Ollama Base URL" hint="e.g. http://localhost:11434">
+                <input
+                  type="text"
+                  className="settings-input"
+                  placeholder="http://localhost:11434"
+                  value={aiBaseURL}
+                  onChange={e => setAiBaseURL(e.target.value)}
+                />
+              </FormGroup>
+            )}
+            {aiProvider && (
+              <FormGroup label="Model" hint="Optional — leave blank to use the provider's default">
+                <input
+                  type="text"
+                  className="settings-input"
+                  placeholder={aiProvider === 'openai' ? 'gpt-4o' : aiProvider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'llama3.2'}
+                  value={aiModel}
+                  onChange={e => setAiModel(e.target.value)}
+                />
+              </FormGroup>
+            )}
+            {aiError && <ErrorMessage message={aiError} />}
+            <div className="flex items-center gap-4">
+              <button type="submit" className="settings-btn-primary">Save</button>
+              {aiSettings?.provider && (
+                <button type="button" onClick={() => void clearAISettings()} className="text-sm text-red-600 dark:text-red-400 hover:underline">
+                  Disconnect
+                </button>
+              )}
+              {aiSaved && <span className="text-sm text-green-600 dark:text-green-400">Saved!</span>}
+            </div>
+          </form>
         </Card>
       )}
 

@@ -424,7 +424,11 @@ export default function AssistantPage() {
           </div>
           
           <p className="mt-8 text-xs text-[var(--text-mid)]/70">
-            Set <code className="px-1.5 py-0.5 rounded bg-[var(--ink)]/5">RUNRIGHT_AI_PROVIDER</code> environment variable to get started
+            Ask an admin to connect a provider in{' '}
+            <button onClick={() => navigate('/app/settings')} className="underline hover:text-[var(--gold)] transition-colors">
+              Settings → General
+            </button>
+            , or set <code className="px-1.5 py-0.5 rounded bg-[var(--ink)]/5">RUNRIGHT_AI_PROVIDER</code> on self-hosted deployments
           </p>
         </div>
       </div>

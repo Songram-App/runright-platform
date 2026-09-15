@@ -30,7 +30,7 @@ func (s *Server) handleEmbeddingStatus(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"configured":  s.embeddings.IsConfigured(),
-		"rag_enabled": s.assistant != nil,
+		"rag_enabled": s.getAssistant() != nil,
 	})
 }
 

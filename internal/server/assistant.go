@@ -23,7 +23,7 @@ func (s *Server) assistantChat(c *gin.Context) {
 
 	userID := c.GetString("user_email")
 
-	resp, err := s.assistant.Chat(c.Request.Context(), req, userID)
+	resp, err := s.getAssistant().Chat(c.Request.Context(), req, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -36,7 +36,7 @@ func (s *Server) assistantChat(c *gin.Context) {
 func (s *Server) assistantConversations(c *gin.Context) {
 	userID := c.GetString("user_email")
 
-	convs, err := s.assistant.GetConversations(c.Request.Context(), userID)
+	convs, err := s.getAssistant().GetConversations(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -55,7 +55,7 @@ func (s *Server) assistantGetConversation(c *gin.Context) {
 
 	userID := c.GetString("user_email")
 
-	conv, messages, err := s.assistant.GetConversation(c.Request.Context(), convID, userID)
+	conv, messages, err := s.getAssistant().GetConversation(c.Request.Context(), convID, userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "conversation not found"})
 		return
@@ -77,7 +77,7 @@ func (s *Server) assistantDeleteConversation(c *gin.Context) {
 
 	userID := c.GetString("user_email")
 
-	if err := s.assistant.DeleteConversation(c.Request.Context(), convID, userID); err != nil {
+	if err := s.getAssistant().DeleteConversation(c.Request.Context(), convID, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -89,7 +89,7 @@ func (s *Server) assistantDeleteConversation(c *gin.Context) {
 func (s *Server) assistantDeleteAllConversations(c *gin.Context) {
 	userID := c.GetString("user_email")
 
-	n, err := s.assistant.DeleteAllConversations(c.Request.Context(), userID)
+	n, err := s.getAssistant().DeleteAllConversations(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -100,7 +100,7 @@ func (s *Server) assistantDeleteAllConversations(c *gin.Context) {
 
 // assistantQuickStats handles GET /api/v1/assistant/stats
 func (s *Server) assistantQuickStats(c *gin.Context) {
-	stats, err := s.assistant.GetQuickStats(c.Request.Context())
+	stats, err := s.getAssistant().GetQuickStats(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -111,18 +111,19 @@ func (s *Server) assistantQuickStats(c *gin.Context) {
 
 // assistantSuggestedQuestions handles GET /api/v1/assistant/suggestions
 func (s *Server) assistantSuggestedQuestions(c *gin.Context) {
-	questions := s.assistant.SuggestedQuestions(c.Request.Context())
+	questions := s.getAssistant().SuggestedQuestions(c.Request.Context())
 	c.JSON(http.StatusOK, gin.H{"questions": questions})
 }
 
 // assistantStatus handles GET /api/v1/assistant/status
 func (s *Server) assistantStatus(c *gin.Context) {
+	a := s.getAssistant()
 	status := gin.H{
-		"configured": s.assistant.IsConfigured(),
+		"configured": a.IsConfigured(),
 	}
 	// Add provider info if configured
-	if s.assistant.IsConfigured() {
-		for k, v := range s.assistant.GetProviderInfo() {
+	if a.IsConfigured() {
+		for k, v := range a.GetProviderInfo() {
 			status[k] = v
 		}
 	}
@@ -131,7 +132,7 @@ func (s *Server) assistantStatus(c *gin.Context) {
 
 // assistantListTools handles GET /api/v1/assistant/tools
 func (s *Server) assistantListTools(c *gin.Context) {
-	tools := s.assistant.AvailableTools()
+	tools := s.getAssistant().AvailableTools()
 	c.JSON(http.StatusOK, gin.H{"tools": tools})
 }
 
@@ -152,7 +153,7 @@ func (s *Server) assistantExecuteTool(c *gin.Context) {
 		userID = id.(string)
 	}
 
-	result, err := s.assistant.ExecuteTool(c.Request.Context(), req.ToolCall, userID, req.ConversationID)
+	result, err := s.getAssistant().ExecuteTool(c.Request.Context(), req.ToolCall, userID, req.ConversationID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -196,17 +197,10 @@ func (s *Server) assistantListActions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"actions": actions})
 }
 
-// registerAssistantRoutes adds assistant endpoints to the router.
+// registerAssistantRoutes adds assistant endpoints to the router. The
+// assistant itself is already initialized (and kept up to date by
+// reloadAssistant) by the time routes are registered.
 func (s *Server) registerAssistantRoutes(v1 *gin.RouterGroup) {
-	if s.assistant == nil {
-		s.assistant = assistant.NewFromEnv(s.db)
-	}
-
-	// Inject embeddings service for RAG if configured
-	if s.embeddings != nil && s.embeddings.IsConfigured() {
-		s.assistant.SetEmbeddingService(s.embeddings)
-	}
-
 	ast := v1.Group("/assistant")
 	{
 		ast.GET("/status", s.assistantStatus)

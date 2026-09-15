@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -33,7 +34,7 @@ type Server struct {
 	slackWebhook    string
 	alertWebhookURL string
 	ssoMgr          *ssoManager
-	assistant       *assistant.Assistant
+	assistantPtr    atomic.Pointer[assistant.Assistant] // see getAssistant/setAssistant — reloadable at runtime via Settings
 	embeddings      *embeddings.Service
 	wsHub           *WSHub
 	githubApp       *GitHubApp
@@ -77,6 +78,13 @@ type Config struct {
 	// Plan is this instance's RunRight Cloud tier ("free"/"pro"/"enterprise").
 	// Empty means unmetered (self-hosted/reference deployments).
 	Plan string
+}
+
+// getAssistant returns the currently active AI assistant. Safe for concurrent
+// use — the pointer may be swapped out at any time by reloadAssistant (e.g.
+// after Settings are saved) while requests are in flight.
+func (s *Server) getAssistant() *assistant.Assistant {
+	return s.assistantPtr.Load()
 }
 
 // New creates a Server, runs migrations, and wires up routes.
@@ -133,12 +141,10 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	// AI assistant — always non-nil (NewFromEnv reports "not configured"
-	// gracefully via IsConfigured() when no API key is set).
-	s.assistant = assistant.NewFromEnv(db)
-	if s.embeddings != nil {
-		s.assistant.SetEmbeddingService(s.embeddings)
-	}
-	if s.assistant.IsConfigured() {
+	// gracefully via IsConfigured() when no API key is set). Prefers settings
+	// saved via the Settings UI (ai_settings table) over RUNRIGHT_AI_* env vars.
+	s.reloadAssistant(context.Background())
+	if s.getAssistant().IsConfigured() {
 		fmt.Println("AI assistant initialized")
 	}
 
@@ -236,6 +242,11 @@ func New(cfg Config) (*Server, error) {
 		v1.GET("/usage", s.getUsageSummary)
 		v1.POST("/quote-requests", s.createQuoteRequest)
 		v1.GET("/quote-requests", s.requirePermission(PermTeamManage), s.listQuoteRequests)
+		// AI assistant provider config — admin-only; API keys are encrypted
+		// at rest and never echoed back once saved.
+		v1.GET("/ai-settings", s.requirePermission(PermTeamManage), s.getAISettings)
+		v1.PUT("/ai-settings", s.requirePermission(PermTeamManage), s.upsertAISettings)
+		v1.DELETE("/ai-settings", s.requirePermission(PermTeamManage), s.deleteAISettings)
 		// Ownership routing.
 		v1.GET("/ownership", s.listOwnership)
 		v1.PUT("/ownership", s.requirePermission(PermOwnershipManage), s.upsertOwnership)

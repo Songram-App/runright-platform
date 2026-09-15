@@ -294,6 +294,31 @@ export const deleteConversation = (id: string): Promise<void> =>
 export const deleteAllConversations = (): Promise<{ deleted: number }> =>
   api.delete<{ deleted: number }>('/assistant/conversations').then((r) => r.data)
 
+// ── AI Assistant provider settings (Settings > General) ─────────────────────
+
+export interface AISettings {
+  provider: '' | 'openai' | 'anthropic' | 'ollama'
+  model?: string
+  base_url?: string
+  api_key_set: boolean
+}
+
+export interface AISettingsInput {
+  provider: 'openai' | 'anthropic' | 'ollama'
+  api_key?: string // blank = leave the currently stored key untouched
+  base_url?: string
+  model?: string
+}
+
+export const fetchAISettings = (): Promise<AISettings> =>
+  api.get<AISettings>('/ai-settings').then((r) => r.data)
+
+export const updateAISettings = (settings: AISettingsInput): Promise<void> =>
+  api.put('/ai-settings', settings).then(() => undefined)
+
+export const deleteAISettings = (): Promise<void> =>
+  api.delete('/ai-settings').then(() => undefined)
+
 // ── Label Mappings & Auto-PR API ────────────────────────────────────────────
 
 export interface LabelMapping {
