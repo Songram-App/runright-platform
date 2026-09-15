@@ -307,6 +307,10 @@ func New(cfg Config) (*Server, error) {
 	// Health check — no auth required.
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 
+	// Serve the built dashboard for anything else — lets a single Fly app
+	// (e.g. a self-serve cloud tenant) serve both API and UI.
+	s.registerStaticUI(r)
+
 	// Start weekly Slack digest if a webhook is configured.
 	if cfg.SlackWebhook != "" {
 		go s.weeklyDigestLoop()
