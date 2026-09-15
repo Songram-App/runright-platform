@@ -175,7 +175,9 @@ func ensureTenantMachine(ctx context.Context, env *provisionEnv, appName string)
 		}
 	}
 
-	runOut, err := runFly(ctx, env.flyAPIToken,
+	// `fly machine run` has no --json flag (only `machine list`/`status` do),
+	// so create it plain and then look its ID up via `machine list --json`.
+	if _, err := runFly(ctx, env.flyAPIToken,
 		"machine", "run", env.image,
 		"--app", appName,
 		"--region", env.region,
@@ -189,14 +191,16 @@ func ensureTenantMachine(ctx context.Context, env *provisionEnv, appName string)
 		// *optional* value; passed as two argv entries, flyctl's flag parser
 		// treats the bare word as a positional "override container command"
 		// instead, silently replacing the server's entrypoint with `suspend`.
-		"--json",
-	)
-	if err != nil {
+	); err != nil {
 		return "", err
 	}
-	ids := parseMachineIDs(runOut)
+	listOut2, err := runFly(ctx, env.flyAPIToken, "machine", "list", "--app", appName, "--json")
+	if err != nil {
+		return "", fmt.Errorf("list machine after create: %w", err)
+	}
+	ids := parseMachineIDs(listOut2)
 	if len(ids) == 0 {
-		return "", fmt.Errorf("could not parse machine id from output: %s", truncateOutput(runOut, 300))
+		return "", fmt.Errorf("could not find created machine for %s", appName)
 	}
 	return ids[0], nil
 }
