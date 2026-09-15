@@ -125,6 +125,10 @@ func (s *Server) provisionTenant(ctx context.Context, slug string) error {
 		"RUNRIGHT_SSO_ENABLED=true",
 		"RUNRIGHT_ALLOWED_ORIGINS=" + baseURL,
 		"CLOUD_CONTROL_PLANE_SECRET=" + cfg.controlPlaneSecret,
+		// Tenants can't register their own GitHub OAuth callback (GitHub Apps
+		// only support a small fixed list), so returning login routes
+		// through the control plane's one registered callback instead.
+		"RUNRIGHT_CONTROL_PLANE_URL=" + os.Getenv("RUNRIGHT_BASE_URL"),
 		"GIN_MODE=release",
 	}
 	if ghID := os.Getenv("GITHUB_APP_ID"); ghID != "" {

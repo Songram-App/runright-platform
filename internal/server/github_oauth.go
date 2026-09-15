@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/go-github/v62/github"
@@ -28,11 +30,32 @@ func getGitHubOAuthConfig() *GitHubOAuthConfig {
 	}
 }
 
+// loginStatePrefix marks a state param as a "returning tenant user" login
+// (as opposed to cloudStatePrefix, which is a brand-new signup).
+const loginStatePrefix = "login:"
+
 // handleGitHubLoginStart kicks off the "sign back into this instance" GitHub
 // OAuth flow (as opposed to cloudAuthGitHub, which is for creating a brand
 // new RunRight Cloud workspace). The UI (LoginPage) links here directly —
 // this endpoint only ever issues a redirect, never renders HTML itself.
+//
+// GitHub Apps only support a small fixed list of registered callback URLs,
+// so a tenant instance (which has its own unique *.fly.dev hostname) can't
+// register its own callback. Instead it redirects here on the CONTROL PLANE
+// (which owns the one registered callback), tagging the request with its own
+// slug; once GitHub authenticates the user, handleGitHubOAuthCallback mints
+// a short-lived claim token and bounces back to that tenant's /cloud/claim.
 func (s *Server) handleGitHubLoginStart(c *gin.Context) {
+	if tenantSlug := os.Getenv("RUNRIGHT_TENANT_SLUG"); tenantSlug != "" {
+		controlPlaneURL := os.Getenv("RUNRIGHT_CONTROL_PLANE_URL")
+		if controlPlaneURL == "" {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "control plane URL not configured"})
+			return
+		}
+		c.Redirect(http.StatusFound, strings.TrimRight(controlPlaneURL, "/")+"/api/v1/github/login?return_slug="+url.QueryEscape(tenantSlug))
+		return
+	}
+
 	cfg := getGitHubOAuthConfig()
 	if cfg.ClientID == "" || cfg.ClientSecret == "" {
 		c.JSON(http.StatusNotFound, gin.H{"error": "GitHub login is not configured"})
@@ -49,6 +72,9 @@ func (s *Server) handleGitHubLoginStart(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start login"})
 		return
+	}
+	if returnSlug := c.Query("return_slug"); returnSlug != "" {
+		state = loginStatePrefix + returnSlug + ":" + state
 	}
 	c.Redirect(http.StatusFound, oauth2Cfg.AuthCodeURL(state))
 }
@@ -106,6 +132,36 @@ func (s *Server) handleGitHubOAuthCallback(c *gin.Context) {
 			email = fmt.Sprintf("%d+%s@users.noreply.github.com", user.GetID(), user.GetLogin())
 		}
 		s.cloudCompleteSignup(c, email, user.GetName(), user.GetAvatarURL(), "github", fmt.Sprintf("%d", user.GetID()))
+		return
+	}
+
+	// A returning tenant user (handleGitHubLoginStart redirected here with
+	// "login:<slug>:<state>") — look up that tenant, mint a short-lived
+	// claim token, and bounce back to its own /cloud/claim to finish login.
+	if strings.HasPrefix(c.Query("state"), loginStatePrefix) {
+		rest := strings.TrimPrefix(c.Query("state"), loginStatePrefix)
+		returnSlug, _, ok := strings.Cut(rest, ":")
+		if !ok || returnSlug == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid login request"})
+			return
+		}
+		var baseURL string
+		if err := s.db.QueryRowContext(context.Background(),
+			`SELECT base_url FROM cloud_tenants WHERE slug = $1`, returnSlug).Scan(&baseURL); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+			return
+		}
+		email := user.GetEmail()
+		if email == "" {
+			email = fmt.Sprintf("%d+%s@users.noreply.github.com", user.GetID(), user.GetLogin())
+		}
+		cloudCfg := getCloudConfig()
+		claimToken, err := signCloudClaimToken(cloudCfg.controlPlaneSecret, returnSlug, email, user.GetName(), 10*time.Minute)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start session"})
+			return
+		}
+		c.Redirect(http.StatusFound, strings.TrimRight(baseURL, "/")+"/api/v1/cloud/claim?token="+claimToken)
 		return
 	}
 
