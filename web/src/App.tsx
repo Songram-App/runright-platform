@@ -54,8 +54,26 @@ function AppRoutes() {
     if (import.meta.env.DEV) return true
     return localStorage.getItem('rr-auth') === 'true'
   })
+  // localStorage is per-origin and won't already say "true" right after a
+  // fresh claim/cross-instance login handoff, even though a valid HttpOnly
+  // session cookie exists. Verify against the server once before committing
+  // to the login screen, instead of trusting a stale/absent local flag.
+  const [checkingSession, setCheckingSession] = useState(() => {
+    if (typeof window === 'undefined' || import.meta.env.DEV) return false
+    return localStorage.getItem('rr-auth') !== 'true'
+  })
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
   const navigate = useNavigate()
+
+  useEffect(() => {
+    if (authed) { setCheckingSession(false); return }
+    fetchCurrentUser()
+      .then(user => { setCurrentUser(user); setAuthed(true) })
+      .catch(() => { /* no valid session — show login */ })
+      .finally(() => setCheckingSession(false))
+    // Only run once on mount; `authed` flips this effect off via the guard above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Load /me whenever authed state turns on.
   useEffect(() => {
@@ -81,6 +99,8 @@ function AppRoutes() {
     const perms = currentUser.permissions
     return perms.includes('*') || perms.includes(perm)
   }
+
+  if (checkingSession) return null
 
   return (
     <UserContext.Provider value={{ user: currentUser, can }}>
