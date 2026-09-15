@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -124,9 +125,41 @@ func (s *Server) provisionTenant(ctx context.Context, slug string) error {
 		return fmt.Errorf("stage secrets: %w", err)
 	}
 
-	// 4. Boot the first Machine from the same image already running in
-	// production; it picks up the staged secrets automatically.
-	if _, err := runFly(ctx, env.flyAPIToken,
+	// 4. Boot the Machine (or reuse+restart one left over from a prior
+	// partial attempt, so a retry doesn't pile up duplicate Machines).
+	machineID, err := ensureTenantMachine(ctx, env, appName)
+	if err != nil {
+		return fmt.Errorf("boot machine: %w", err)
+	}
+
+	// 5. Don't declare victory until it actually answers requests. Check over
+	// Fly's private network (<machine>.vm.<app>.internal) rather than the
+	// public https://<app>.fly.dev hostname — a brand-new app's public DNS
+	// can take a bit to propagate, but 6PN/internal addressing is live the
+	// instant the Machine exists.
+	internalHealthURL := fmt.Sprintf("http://%s.vm.%s.internal:8080/healthz", machineID, appName)
+	if err := waitForHealth(ctx, internalHealthURL, 90*time.Second); err != nil {
+		return fmt.Errorf("health check: %w", err)
+	}
+	return nil
+}
+
+// ensureTenantMachine boots the tenant's Machine, or — if one already exists
+// from a prior partial provisioning attempt — restarts it so it picks up any
+// secrets staged since, rather than creating a duplicate Machine on retry.
+func ensureTenantMachine(ctx context.Context, env *provisionEnv, appName string) (string, error) {
+	listOut, err := runFly(ctx, env.flyAPIToken, "machine", "list", "--app", appName, "--json")
+	if err == nil {
+		if ids := parseMachineIDs(listOut); len(ids) > 0 {
+			existing := ids[0]
+			if _, err := runFly(ctx, env.flyAPIToken, "machine", "restart", existing, "--app", appName); err != nil {
+				return "", fmt.Errorf("restart existing machine: %w", err)
+			}
+			return existing, nil
+		}
+	}
+
+	runOut, err := runFly(ctx, env.flyAPIToken,
 		"machine", "run", env.image,
 		"--app", appName,
 		"--region", env.region,
@@ -137,13 +170,38 @@ func (s *Server) provisionTenant(ctx context.Context, slug string) error {
 		"--vm-memory", "256",
 		"--autostart",
 		"--autostop", "suspend",
-	); err != nil {
-		return fmt.Errorf("boot machine: %w", err)
+		"--json",
+	)
+	if err != nil {
+		return "", err
 	}
+	ids := parseMachineIDs(runOut)
+	if len(ids) == 0 {
+		return "", fmt.Errorf("could not parse machine id from output: %s", truncateOutput(runOut, 300))
+	}
+	return ids[0], nil
+}
 
-	// 5. Don't declare victory until it actually answers requests.
-	if err := waitForHealth(ctx, baseURL+"/healthz", 90*time.Second); err != nil {
-		return fmt.Errorf("health check: %w", err)
+// parseMachineIDs extracts Machine IDs from flyctl --json output, which may
+// be a single object (machine run) or an array (machine list).
+func parseMachineIDs(out string) []string {
+	var obj struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(out), &obj); err == nil && obj.ID != "" {
+		return []string{obj.ID}
+	}
+	var arr []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(out), &arr); err == nil {
+		var ids []string
+		for _, m := range arr {
+			if m.ID != "" {
+				ids = append(ids, m.ID)
+			}
+		}
+		return ids
 	}
 	return nil
 }
