@@ -185,12 +185,15 @@ func swapDSNDatabase(dsn, dbName string) (string, error) {
 }
 
 // runFly shells out to the bundled flyctl binary, authenticated via
-// FLY_API_TOKEN so it never needs interactive `fly auth login`.
+// FLY_API_TOKEN so it never needs interactive `fly auth login`. The backend
+// image is FROM scratch (no /etc/passwd, no shell), so flyctl has no HOME to
+// find its config/cache dir in unless we set one explicitly.
 func runFly(ctx context.Context, token string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, flyBinary, args...)
 	cmd.Env = []string{
 		"FLY_API_TOKEN=" + token,
 		"FLY_NO_UPDATE_CHECK=1",
+		"HOME=/tmp",
 	}
 	var out bytes.Buffer
 	cmd.Stdout = &out

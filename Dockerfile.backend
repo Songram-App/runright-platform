@@ -4,6 +4,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /runright-server ./cmd/server
+# scratch has no filesystem beyond what's explicitly copied in; flyctl needs a
+# real, writable $HOME (for its config/cache dir) when shelled out.
+RUN mkdir -m 1777 /tmp-home
 
 # flyctl is shelled out to by the cloud-provisioning feature (creating a
 # dedicated Fly app + Postgres database per self-serve customer).
@@ -11,6 +14,7 @@ FROM flyio/flyctl:latest AS flyctl
 
 FROM scratch
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /tmp-home /tmp
 COPY --from=builder /runright-server /runright-server
 COPY --from=flyctl /flyctl /usr/local/bin/fly
 EXPOSE 8080
