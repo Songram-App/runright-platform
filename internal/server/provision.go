@@ -97,6 +97,22 @@ func (s *Server) provisionTenant(ctx context.Context, slug string) error {
 		}
 	}
 
+	// A freshly created app has no public IP/DNS at all — <app>.fly.dev
+	// won't resolve until one is allocated. This is a separate step from
+	// creating the app or a Machine; `fly launch`/`fly deploy` normally do
+	// it implicitly, but `fly apps create` + `fly machine run` don't.
+	// --shared v4 is free; v6 is required alongside it and also free.
+	if _, err := runFly(ctx, env.flyAPIToken, "ips", "allocate-v6", "--app", appName); err != nil {
+		if !strings.Contains(err.Error(), "already") {
+			return fmt.Errorf("allocate ipv6: %w", err)
+		}
+	}
+	if _, err := runFly(ctx, env.flyAPIToken, "ips", "allocate-v4", "--app", appName, "--shared"); err != nil {
+		if !strings.Contains(err.Error(), "already") {
+			return fmt.Errorf("allocate ipv4: %w", err)
+		}
+	}
+
 	// 3. Stage secrets before any Machine exists; a Machine created after
 	// this point inherits them automatically as env vars.
 	apiKey, _, _ := generateAPIKey()
@@ -169,7 +185,10 @@ func ensureTenantMachine(ctx context.Context, env *provisionEnv, appName string)
 		"--vm-cpus", "1",
 		"--vm-memory", "256",
 		"--autostart",
-		"--autostop", "suspend",
+		"--autostop=suspend", // NOT "--autostop", "suspend" — autostop takes an
+		// *optional* value; passed as two argv entries, flyctl's flag parser
+		// treats the bare word as a positional "override container command"
+		// instead, silently replacing the server's entrypoint with `suspend`.
 		"--json",
 	)
 	if err != nil {
