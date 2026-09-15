@@ -218,13 +218,14 @@ func (s *Server) cloudCompleteSignup(c *gin.Context, email, name, handle, avatar
 		return
 	}
 
-	var tenantID string
+	var tenantID, slug, status string
 	err = s.db.QueryRowContext(ctx,
-		`SELECT id FROM cloud_tenants WHERE customer_id = $1 ORDER BY created_at ASC LIMIT 1`,
-		customerID).Scan(&tenantID)
+		`SELECT id, slug, status FROM cloud_tenants WHERE customer_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		customerID).Scan(&tenantID, &slug, &status)
 	switch {
 	case err == sql.ErrNoRows:
-		slug, slugErr := s.reserveTenantSlug(ctx, handle, email)
+		var slugErr error
+		slug, slugErr = s.reserveTenantSlug(ctx, handle, email)
 		if slugErr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to allocate a workspace"})
 			return
@@ -246,6 +247,17 @@ func (s *Server) cloudCompleteSignup(c *gin.Context, email, name, handle, avatar
 	case err != nil:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up workspace"})
 		return
+	case status == "failed":
+		// A previous attempt died partway through (e.g. infra hiccup). Retry
+		// using the same slug/row — createTenantDatabase and `fly apps
+		// create` are both safe to re-run against partially-provisioned state.
+		if _, resetErr := s.db.ExecContext(ctx,
+			`UPDATE cloud_tenants SET status = 'provisioning', error_message = NULL WHERE id = $1`,
+			tenantID); resetErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retry workspace setup"})
+			return
+		}
+		go s.provisionTenantAsync(tenantID, slug)
 	}
 
 	c.Redirect(http.StatusFound, "/api/v1/cloud/wait?tenant="+tenantID)

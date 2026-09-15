@@ -88,9 +88,12 @@ func (s *Server) provisionTenant(ctx context.Context, slug string) error {
 		return fmt.Errorf("database: %w", err)
 	}
 
-	// 2. Dedicated Fly app for this customer's compute.
+	// 2. Dedicated Fly app for this customer's compute. Tolerate "already
+	// exists" so a retry after a partial failure doesn't blow up here.
 	if _, err := runFly(ctx, env.flyAPIToken, "apps", "create", appName, "--org", env.flyOrgSlug); err != nil {
-		return fmt.Errorf("create app: %w", err)
+		if !strings.Contains(err.Error(), "already been taken") {
+			return fmt.Errorf("create app: %w", err)
+		}
 	}
 
 	// 3. Stage secrets before any Machine exists; a Machine created after
