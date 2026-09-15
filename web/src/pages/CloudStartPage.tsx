@@ -21,9 +21,18 @@ const GoogleIcon = () => (
 // The signup-method chooser for RunRight Cloud — linked from the marketing
 // site's CTAs. Talks only to JSON API endpoints (/api/v1/cloud/providers);
 // clicking a provider button is a real browser navigation to that
-// provider's OAuth-kickoff redirect endpoint, not a fetch.
+// provider's OAuth-kickoff redirect endpoint, not a fetch. Styled to match
+// LoginPage: light mode by default, with the same dark-mode toggle.
 export default function CloudStartPage() {
   const [providers, setProviders] = useState<{ github: boolean; google: boolean } | null>(null)
+  const [dark, setDark] = useState(() =>
+    typeof window !== 'undefined' ? localStorage.getItem('rr-theme') === 'dark' : false
+  )
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', dark)
+    localStorage.setItem('rr-theme', dark ? 'dark' : 'light')
+  }, [dark])
 
   useEffect(() => {
     fetchCloudProviders()
@@ -32,43 +41,65 @@ export default function CloudStartPage() {
   }, [])
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-[#1A0F02] text-[#E8C458] px-4 font-sans">
-      <div className="w-full max-w-sm text-center">
-        <div className="flex flex-col items-center mb-6">
-          <LogoMark size={32} color="currentColor" />
-          <div className="font-deco text-[18px] tracking-[3px] mt-2">RUNRIGHT CLOUD</div>
-        </div>
-        <h1 className="text-xl font-bold mb-2">Create your workspace</h1>
-        <p className="text-sm text-[#C4A882] mb-7 leading-relaxed">
-          Pick how you'd like to sign in. We'll spin up a dedicated, isolated instance just for you.
-        </p>
-
-        <a
-          href="/api/v1/cloud/auth/github"
-          className="flex items-center justify-center gap-2.5 w-full py-3.5 px-5 mb-3 bg-[#2C1A0E] border border-[#4a2e18] rounded-md text-[#FBF0DC] text-sm hover:border-[#B8860B] transition-colors"
-        >
-          <GitHubIcon />
-          Continue with GitHub
-        </a>
-
-        {providers?.google ? (
-          <a
-            href="/api/v1/cloud/auth/google"
-            className="flex items-center justify-center gap-2.5 w-full py-3.5 px-5 bg-[#2C1A0E] border border-[#4a2e18] rounded-md text-[#FBF0DC] text-sm hover:border-[#B8860B] transition-colors"
-          >
-            <GoogleIcon />
-            Continue with Google
-          </a>
+    <div className="flex items-center justify-center min-h-screen bg-[var(--cream)] px-4 py-8 font-sans relative">
+      <button
+        onClick={() => setDark(d => !d)}
+        className="absolute top-4 right-4 p-2 text-[var(--text-light)] hover:text-[var(--text)] transition-colors"
+        aria-label="Toggle dark mode"
+      >
+        {dark ? (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="5"/>
+            <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+            <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+          </svg>
         ) : (
-          <button
-            disabled
-            title="Coming soon"
-            className="flex items-center justify-center gap-2.5 w-full py-3.5 px-5 bg-[#2C1A0E] border border-[#4a2e18] rounded-md text-[#FBF0DC] text-sm opacity-50 cursor-not-allowed"
-          >
-            <GoogleIcon />
-            Continue with Google &mdash; coming soon
-          </button>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
         )}
+      </button>
+
+      <div className="w-full max-w-sm">
+        <div className="bg-paper border border-[var(--border)] shadow-[5px_5px_0_rgba(92,58,30,.15)] px-8 py-10 sm:px-10 text-center">
+          <div className="flex flex-col items-center mb-6">
+            <LogoMark size={36} color="currentColor" />
+            <div className="font-deco text-[20px] tracking-[3px] mt-2">RUNRIGHT CLOUD</div>
+          </div>
+          <h1 className="text-lg font-bold text-[var(--text)] mb-2">Create your workspace</h1>
+          <p className="text-[13px] text-[var(--text-mid)] mb-7 leading-relaxed">
+            Pick how you'd like to sign in. We'll spin up a dedicated, isolated instance just for you.
+          </p>
+
+          <a
+            href="/api/v1/cloud/auth/github"
+            className="w-full flex items-center justify-center gap-3 py-3.5 px-4 bg-[#2C1A0E] dark:bg-[#F5E4C8] text-[#FBF0DC] dark:text-[#2C1A0E] hover:bg-[#3D2810] dark:hover:bg-[#E8D4B8] transition-colors font-deco text-[15px] tracking-[2px] mb-3"
+          >
+            <GitHubIcon />
+            <span>Continue with GitHub</span>
+          </a>
+
+          {providers?.google ? (
+            <a
+              href="/api/v1/cloud/auth/google"
+              className="w-full flex items-center justify-center gap-3 py-3.5 px-4 border border-[var(--border)] text-[var(--text)] hover:bg-[var(--cream-alt)] transition-colors font-deco text-[15px] tracking-[2px]"
+            >
+              <GoogleIcon />
+              <span>Continue with Google</span>
+            </a>
+          ) : (
+            <button
+              disabled
+              title="Coming soon"
+              className="w-full flex items-center justify-center gap-3 py-3.5 px-4 border border-[var(--border)] text-[var(--text-light)] font-deco text-[15px] tracking-[2px] opacity-60 cursor-not-allowed"
+            >
+              <GoogleIcon />
+              <span>Continue with Google &mdash; coming soon</span>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )
