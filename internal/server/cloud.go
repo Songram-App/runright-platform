@@ -201,6 +201,7 @@ func (s *Server) cloudCompleteSignup(c *gin.Context, email, name, avatarURL, pro
 		RETURNING id
 	`, email, name, avatarURL, provider, providerUID).Scan(&customerID)
 	if err != nil {
+		fmt.Printf("[cloud] upsert customer failed for %s: %v\n", email, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create account"})
 		return
 	}
@@ -226,12 +227,14 @@ func (s *Server) cloudCompleteSignup(c *gin.Context, email, name, avatarURL, pro
 			RETURNING id
 		`, customerID, slug, appName, dbName, baseURL).Scan(&tenantID)
 		if insertErr != nil {
+			fmt.Printf("[cloud] insert tenant failed for %s: %v\n", email, insertErr)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create workspace"})
 			return
 		}
 		s.logAudit(ctx, email, c, "cloud.signup", "cloud_tenant", tenantID, slug, nil)
 		go s.provisionTenantAsync(tenantID, slug)
 	case err != nil:
+		fmt.Printf("[cloud] look up tenant failed for %s: %v\n", email, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up workspace"})
 		return
 	case status == "failed":
@@ -436,11 +439,17 @@ func (s *Server) cloudClaim(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	var existingOwners int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sso_users WHERE role = 'owner'`).Scan(&existingOwners); err == nil && existingOwners > 0 {
+	var existingOwnerEmail string
+	err = s.db.QueryRowContext(ctx, `SELECT email FROM sso_users WHERE role = 'owner' LIMIT 1`).Scan(&existingOwnerEmail)
+	ownerExists := err == nil
+	if ownerExists && existingOwnerEmail != payload.Email {
+		// Someone else already claimed this workspace — reject.
 		c.JSON(http.StatusConflict, gin.H{"error": "this workspace has already been claimed"})
 		return
 	}
+	// If the rightful owner is retrying (e.g. a cold-start hiccup interrupted
+	// their first request, or they double-clicked the link), fall through
+	// and just log them in again rather than erroring.
 
 	name := payload.Name
 	if name == "" {
@@ -454,6 +463,7 @@ func (s *Server) cloudClaim(c *gin.Context) {
 		RETURNING id
 	`, payload.Email, name).Scan(&userID)
 	if err != nil {
+		fmt.Printf("[cloud] claim failed for %s: %v\n", payload.Email, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create account"})
 		return
 	}
