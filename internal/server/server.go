@@ -152,6 +152,9 @@ func New(cfg Config) (*Server, error) {
 		gh.POST("/webhook", s.githubApp.HandleWebhook)
 		// OAuth callback for user login via GitHub App
 		gh.GET("/callback", s.handleGitHubOAuthCallback)
+		// Kicks off the "sign back in" flow for returning users — the UI
+		// (LoginPage) links here directly.
+		gh.GET("/login", s.handleGitHubLoginStart)
 		// App status — public
 		gh.GET("/status", s.githubApp.GetAppStatus)
 	}
@@ -162,12 +165,11 @@ func New(cfg Config) (*Server, error) {
 	// /claim to accept the one-time handoff token from signup.
 	cloud := r.Group("/api/v1/cloud")
 	{
-		cloud.GET("/start", s.cloudStartPage)
+		cloud.GET("/providers", s.cloudProviders)
 		cloud.GET("/auth/github", s.cloudAuthGitHub)
 		cloud.GET("/auth/google", s.cloudAuthGoogle)
 		cloud.GET("/auth/google/callback", s.cloudAuthGoogleCallback)
 		cloud.GET("/status", s.cloudTenantStatus)
-		cloud.GET("/wait", s.cloudWaitPage)
 		cloud.GET("/claim", s.cloudClaim)
 	}
 

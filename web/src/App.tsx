@@ -12,6 +12,8 @@ import AssistantPage from './pages/AssistantPage'
 import AutoPRPage from './pages/AutoPRPage'
 import GitHubAppPage from './pages/GitHubAppPage'
 import LoginPage from './pages/LoginPage'
+import CloudStartPage from './pages/CloudStartPage'
+import CloudWaitPage from './pages/CloudWaitPage'
 import ReposPage from './pages/ReposPage'
 import RepoDetailPage from './pages/RepoDetailPage'
 import RunHistoryPage from './pages/RunHistoryPage'
@@ -84,6 +86,8 @@ function AppRoutes() {
     <UserContext.Provider value={{ user: currentUser, can }}>
       <Routes>
         <Route path="/" element={<Navigate to="/login" replace />} />
+        <Route path="/cloud/start" element={<CloudStartPage />} />
+        <Route path="/cloud/wait" element={<CloudWaitPage />} />
         <Route
           path="/login"
           element={

@@ -28,6 +28,31 @@ func getGitHubOAuthConfig() *GitHubOAuthConfig {
 	}
 }
 
+// handleGitHubLoginStart kicks off the "sign back into this instance" GitHub
+// OAuth flow (as opposed to cloudAuthGitHub, which is for creating a brand
+// new RunRight Cloud workspace). The UI (LoginPage) links here directly —
+// this endpoint only ever issues a redirect, never renders HTML itself.
+func (s *Server) handleGitHubLoginStart(c *gin.Context) {
+	cfg := getGitHubOAuthConfig()
+	if cfg.ClientID == "" || cfg.ClientSecret == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "GitHub login is not configured"})
+		return
+	}
+	oauth2Cfg := &oauth2.Config{
+		ClientID:     cfg.ClientID,
+		ClientSecret: cfg.ClientSecret,
+		Endpoint:     oauth2gh.Endpoint,
+		RedirectURL:  cfg.RedirectURL,
+		Scopes:       []string{"read:user", "user:email"},
+	}
+	state, err := randomToken(16)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start login"})
+		return
+	}
+	c.Redirect(http.StatusFound, oauth2Cfg.AuthCodeURL(state))
+}
+
 // handleGitHubOAuthCallback processes the OAuth callback after user authorizes the app
 func (s *Server) handleGitHubOAuthCallback(c *gin.Context) {
 	code := c.Query("code")

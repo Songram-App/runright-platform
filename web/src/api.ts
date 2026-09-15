@@ -159,6 +159,37 @@ export const fetchSSOMe = (): Promise<SSOUser> =>
 export const ssoLogout = (): Promise<void> =>
   api.post('/sso/logout').then(() => undefined)
 
+// ── RunRight Cloud signup API ────────────────────────────────────────────────
+
+export interface CloudProviders {
+  github: boolean
+  google: boolean
+}
+
+export const fetchCloudProviders = (): Promise<CloudProviders> =>
+  api.get<CloudProviders>('/cloud/providers').then((r) => r.data)
+
+export interface CloudTenantStatus {
+  status: 'provisioning' | 'active' | 'failed'
+  slug: string
+  claim_url?: string
+  error?: string
+}
+
+export const fetchCloudTenantStatus = (tenantId: string): Promise<CloudTenantStatus> =>
+  api.get<CloudTenantStatus>('/cloud/status', { params: { tenant: tenantId } }).then((r) => r.data)
+
+// ── GitHub App status (used by LoginPage to show/hide "Sign in with GitHub") ─
+
+export interface GitHubAppStatus {
+  configured: boolean
+  install_url?: string
+  installation_count?: number
+}
+
+export const fetchGitHubStatus = (): Promise<GitHubAppStatus> =>
+  api.get<GitHubAppStatus>('/github/status').then((r) => r.data)
+
 // Admin SSO config management
 export const fetchSSOConfigs = (): Promise<SSOConfig[]> =>
   api.get<{ configs: SSOConfig[] }>('/sso/configs').then((r) => r.data?.configs ?? [])

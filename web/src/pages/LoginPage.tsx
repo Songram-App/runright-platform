@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { login, fetchSSOProviders } from '../api'
+import { login, fetchSSOProviders, fetchGitHubStatus } from '../api'
 import type { SSOProvider } from '../types'
 import LogoMark from '../components/LogoMark'
 
@@ -74,6 +74,7 @@ export default function LoginPage({ onLogin }: Props) {
   const [loading, setLoading] = useState(false)
   const [ssoProviders, setSSOProviders] = useState<SSOProvider[]>([])
   const [loadingSSO, setLoadingSSO] = useState(true)
+  const [githubEnabled, setGithubEnabled] = useState(false)
   const [dark, setDark] = useState(() =>
     typeof window !== 'undefined' ? localStorage.getItem('rr-theme') === 'dark' : false
   )
@@ -91,6 +92,14 @@ export default function LoginPage({ onLogin }: Props) {
       .then(providers => setSSOProviders(providers))
       .catch(() => setSSOProviders([]))
       .finally(() => setLoadingSSO(false))
+  }, [])
+
+  // GitHub OAuth login is available whenever this instance's GitHub App is
+  // configured (true for every RunRight Cloud tenant; optional self-hosted).
+  useEffect(() => {
+    fetchGitHubStatus()
+      .then(s => setGithubEnabled(s.configured))
+      .catch(() => setGithubEnabled(false))
   }, [])
 
   async function handleSubmit(e: React.FormEvent) {
@@ -157,25 +166,36 @@ export default function LoginPage({ onLogin }: Props) {
 
           {/* Single SSO Button */}
           {!loadingSSO && hasSSO && (
-            <>
-              <button
-                type="button"
-                onClick={handleSSOLogin}
-                className="w-full flex items-center justify-center gap-3 py-3.5 px-4 bg-[#2C1A0E] dark:bg-[#F5E4C8] text-[#FBF0DC] dark:text-[#2C1A0E] hover:bg-[#3D2810] dark:hover:bg-[#E8D4B8] transition-colors font-deco text-[15px] tracking-[2px] mb-6"
-              >
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                  <path d="M7 11V7a5 5 0 0110 0v4"/>
-                </svg>
-                <span>Sign in with SSO</span>
-              </button>
+            <button
+              type="button"
+              onClick={handleSSOLogin}
+              className="w-full flex items-center justify-center gap-3 py-3.5 px-4 bg-[#2C1A0E] dark:bg-[#F5E4C8] text-[#FBF0DC] dark:text-[#2C1A0E] hover:bg-[#3D2810] dark:hover:bg-[#E8D4B8] transition-colors font-deco text-[15px] tracking-[2px] mb-3"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0110 0v4"/>
+              </svg>
+              <span>Sign in with SSO</span>
+            </button>
+          )}
 
-              <div className="flex items-center gap-3 mb-5">
-                <div className="flex-1 h-px bg-[var(--border)]" />
-                <span className="font-deco text-[10px] tracking-[2px] text-[var(--text-light)]">OR USE API KEY</span>
-                <div className="flex-1 h-px bg-[var(--border)]" />
-              </div>
-            </>
+          {/* GitHub OAuth login */}
+          {githubEnabled && (
+            <a
+              href="/api/v1/github/login"
+              className="w-full flex items-center justify-center gap-3 py-3.5 px-4 bg-[#2C1A0E] dark:bg-[#F5E4C8] text-[#FBF0DC] dark:text-[#2C1A0E] hover:bg-[#3D2810] dark:hover:bg-[#E8D4B8] transition-colors font-deco text-[15px] tracking-[2px] mb-3"
+            >
+              <ProviderIcon type="github" />
+              <span>Sign in with GitHub</span>
+            </a>
+          )}
+
+          {(hasSSO || githubEnabled) && (
+            <div className="flex items-center gap-3 mb-5">
+              <div className="flex-1 h-px bg-[var(--border)]" />
+              <span className="font-deco text-[10px] tracking-[2px] text-[var(--text-light)]">OR USE API KEY</span>
+              <div className="flex-1 h-px bg-[var(--border)]" />
+            </div>
           )}
 
           {/* API Key Login */}
