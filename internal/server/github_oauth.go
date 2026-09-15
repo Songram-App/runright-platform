@@ -80,7 +80,7 @@ func (s *Server) handleGitHubOAuthCallback(c *gin.Context) {
 			// AND a public/verified email exists; fall back to a stable address.
 			email = fmt.Sprintf("%d+%s@users.noreply.github.com", user.GetID(), user.GetLogin())
 		}
-		s.cloudCompleteSignup(c, email, user.GetName(), user.GetLogin(), user.GetAvatarURL(), "github", fmt.Sprintf("%d", user.GetID()))
+		s.cloudCompleteSignup(c, email, user.GetName(), user.GetAvatarURL(), "github", fmt.Sprintf("%d", user.GetID()))
 		return
 	}
 

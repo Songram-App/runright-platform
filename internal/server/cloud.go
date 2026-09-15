@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
@@ -47,18 +46,6 @@ func getCloudConfig() cloudCfg {
 		googleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
 		controlPlaneSecret: os.Getenv("CLOUD_CONTROL_PLANE_SECRET"),
 	}
-}
-
-var slugInvalidChars = regexp.MustCompile(`[^a-z0-9-]+`)
-
-func slugify(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	s = slugInvalidChars.ReplaceAllString(s, "-")
-	s = strings.Trim(s, "-")
-	if len(s) > 24 {
-		s = s[:24]
-	}
-	return s
 }
 
 func randomToken(nBytes int) (string, error) {
@@ -193,12 +180,12 @@ func (s *Server) cloudAuthGoogleCallback(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse Google profile"})
 		return
 	}
-	s.cloudCompleteSignup(c, profile.Email, profile.Name, profile.Name, profile.Picture, "google", profile.Sub)
+	s.cloudCompleteSignup(c, profile.Email, profile.Name, profile.Picture, "google", profile.Sub)
 }
 
 // --- Shared signup completion: upsert customer, ensure tenant, kick off provisioning ---
 
-func (s *Server) cloudCompleteSignup(c *gin.Context, email, name, handle, avatarURL, provider, providerUID string) {
+func (s *Server) cloudCompleteSignup(c *gin.Context, email, name, avatarURL, provider, providerUID string) {
 	ctx := c.Request.Context()
 	if email == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "your account has no accessible email address"})
@@ -225,7 +212,7 @@ func (s *Server) cloudCompleteSignup(c *gin.Context, email, name, handle, avatar
 	switch {
 	case err == sql.ErrNoRows:
 		var slugErr error
-		slug, slugErr = s.reserveTenantSlug(ctx, handle, email)
+		slug, slugErr = s.reserveTenantSlug(ctx)
 		if slugErr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to allocate a workspace"})
 			return
@@ -263,25 +250,43 @@ func (s *Server) cloudCompleteSignup(c *gin.Context, email, name, handle, avatar
 	c.Redirect(http.StatusFound, "/api/v1/cloud/wait?tenant="+tenantID)
 }
 
-func (s *Server) reserveTenantSlug(ctx context.Context, handle, email string) (string, error) {
-	base := slugify(handle)
-	if base == "" {
-		if at := strings.Index(email, "@"); at > 0 {
-			base = slugify(email[:at])
-		}
+// slugAdjectives/slugNouns generate a friendly, random workspace slug (e.g.
+// "swift-otter-4f2a") instead of deriving one from the customer's GitHub
+// handle or email — keeps their identity out of a public URL.
+var slugAdjectives = []string{
+	"swift", "calm", "brave", "quiet", "bold", "lucky", "bright", "gentle",
+	"keen", "merry", "rapid", "sunny", "vivid", "witty", "amber", "coral",
+	"ember", "frost", "onyx", "cedar",
+}
+var slugNouns = []string{
+	"otter", "falcon", "harbor", "meadow", "comet", "heron", "tundra",
+	"lagoon", "willow", "canyon", "ridge", "orchid", "summit", "brook",
+	"atlas", "delta", "nova", "reef", "grove", "crest",
+}
+
+func randomSlugWord(words []string) (string, error) {
+	b := make([]byte, 1)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
 	}
-	if base == "" {
-		base = "team"
-	}
+	return words[int(b[0])%len(words)], nil
+}
+
+func (s *Server) reserveTenantSlug(ctx context.Context) (string, error) {
 	for attempt := 0; attempt < 8; attempt++ {
-		candidate := base
-		if attempt > 0 {
-			suffix, err := randomToken(2)
-			if err != nil {
-				return "", err
-			}
-			candidate = fmt.Sprintf("%s-%s", base, suffix)
+		adj, err := randomSlugWord(slugAdjectives)
+		if err != nil {
+			return "", err
 		}
+		noun, err := randomSlugWord(slugNouns)
+		if err != nil {
+			return "", err
+		}
+		suffix, err := randomToken(2)
+		if err != nil {
+			return "", err
+		}
+		candidate := fmt.Sprintf("%s-%s-%s", adj, noun, suffix)
 		var exists bool
 		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM cloud_tenants WHERE slug = $1)`, candidate).Scan(&exists); err != nil {
 			return "", err

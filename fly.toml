@@ -1,9 +1,11 @@
 # Fly.io configuration for RunRight Platform
 # Deploy with: fly deploy
 #
-# Custom domain setup (once):
-#   fly certs create api.runright.dev --app runright-api
-#   # then add a CNAME record: api.runright.dev -> runright-api.fly.dev
+# No custom domain configured — served directly at runright-api.fly.dev.
+# (If you ever add one: fly certs create api.runright.dev --app runright-api,
+#  then CNAME api.runright.dev -> runright-api.fly.dev, then update
+#  RUNRIGHT_BASE_URL below AND the RUNRIGHT_BASE_URL *secret*, which takes
+#  precedence over this [env] value.)
 
 app = "runright-api"
 primary_region = "iad"
@@ -14,8 +16,8 @@ primary_region = "iad"
 [env]
   PORT = "8080"
   GIN_MODE = "release"
-  RUNRIGHT_BASE_URL = "https://api.runright.dev"
-  RUNRIGHT_ALLOWED_ORIGINS = "https://app.runright.dev,https://runright.dev"
+  RUNRIGHT_BASE_URL = "https://runright-api.fly.dev"
+  RUNRIGHT_ALLOWED_ORIGINS = "https://runright-api.fly.dev,https://runright.dev"
 
 [http_service]
   internal_port = 8080
