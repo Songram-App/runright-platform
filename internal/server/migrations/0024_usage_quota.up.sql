@@ -1,5 +1,5 @@
 -- Free-tier usage caps ("things free users can do before we ask them to talk
--- pricing"). Enforcement lives in Go (see internal/server/usage.go); this
+-- pricing"). Enforcement lives in Go (see internal/server/usage.go) -- this
 -- table just captures the leads generated when someone hits a cap or asks
 -- for pricing proactively from Settings.
 
