@@ -58,7 +58,10 @@ export function buildBrandingCSS(ws: WorkspaceSettings): string {
   return css
 }
 
-function applyBrandingCSS(ws: WorkspaceSettings) {
+// Applies branding CSS to the live document immediately — used both for the
+// real saved settings (on load/refresh) and for a temporary, unsaved preview
+// while an admin is still editing Settings > General (see SettingsPage).
+export function previewBrandingCSS(ws: WorkspaceSettings) {
   if (typeof document === 'undefined') return
   let tag = document.getElementById(STYLE_TAG_ID) as HTMLStyleElement | null
   if (!tag) {
@@ -77,7 +80,7 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
     try {
       const ws = await fetchWorkspaceSettings()
       setSettings(ws)
-      applyBrandingCSS(ws)
+      previewBrandingCSS(ws)
     } catch {
       // Self-hosted/pre-migration/transient error — keep default branding.
     } finally {

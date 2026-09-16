@@ -4,7 +4,7 @@ import { RequestQuoteModal } from '../components/RequestQuoteModal'
 import { CURRENCY_OPTIONS, type CurrencyCode, useCurrencyPreference } from '../currency'
 import type { SSOConfig, SSOProviderType, SSOUser, Role } from '../types'
 import { useUser } from '../App'
-import { useBranding } from '../contexts/BrandingContext'
+import { useBranding, previewBrandingCSS } from '../contexts/BrandingContext'
 import { usePagination } from '../hooks/usePagination'
 import { ListControls } from '../components/ListControls'
 
@@ -138,6 +138,18 @@ const DARK_DEFAULTS: Required<ThemePalette> = {
   sidebar_bg: '#231810', sidebar_text: '#F9E9CD', accent: '#B8860B',
 }
 
+const FONT_PRESETS: { label: string; value: string }[] = [
+  { label: 'Default (Vintage)', value: '' },
+  { label: 'Inter', value: 'Inter, system-ui, sans-serif' },
+  { label: 'Roboto', value: 'Roboto, system-ui, sans-serif' },
+  { label: 'System UI', value: 'system-ui, -apple-system, "Segoe UI", sans-serif' },
+  { label: 'Georgia (Serif)', value: 'Georgia, "Times New Roman", serif' },
+  { label: 'Times New Roman', value: '"Times New Roman", Times, serif' },
+  { label: 'Verdana', value: 'Verdana, Geneva, sans-serif' },
+  { label: 'Courier New (Mono)', value: '"Courier New", Courier, monospace' },
+]
+const CUSTOM_FONT_VALUE = '__custom__'
+
 // === General Settings Tab ===
 function GeneralTab() {
   const { can } = useUser()
@@ -158,6 +170,8 @@ function GeneralTab() {
   const [lightTheme, setLightTheme] = useState<ThemePalette>({})
   const [darkTheme, setDarkTheme] = useState<ThemePalette>({})
   const [fontFamily, setFontFamily] = useState('')
+  const [customFont, setCustomFont] = useState(false)
+  const [themeLoaded, setThemeLoaded] = useState(false)
   const [logoDataUrl, setLogoDataUrl] = useState('')
   const [logoError, setLogoError] = useState('')
   const [workspaceSaved, setWorkspaceSaved] = useState(false)
@@ -193,9 +207,12 @@ function GeneralTab() {
         if (!light.accent && ws.accent_color) light.accent = ws.accent_color // migrate the old single-field save
         setLightTheme(light)
         setDarkTheme(ws.theme?.dark ?? {})
-        setFontFamily(ws.theme?.font_family ?? '')
+        const loadedFont = ws.theme?.font_family ?? ''
+        setFontFamily(loadedFont)
+        setCustomFont(loadedFont !== '' && !FONT_PRESETS.some(p => p.value === loadedFont))
       })
       .catch(() => { /* fall back to placeholder */ })
+      .finally(() => setThemeLoaded(true))
     fetchUsage()
       .then(setUsage)
       .catch(() => { /* self-hosted or transient error — just hide the card */ })
@@ -214,6 +231,19 @@ function GeneralTab() {
   useEffect(() => {
     setPreferredCurrency(currency)
   }, [currency])
+
+  // Live preview: apply pending (unsaved) theme changes to the whole app
+  // immediately, so color/font pickers show their real effect right away.
+  useEffect(() => {
+    if (!themeLoaded) return
+    previewBrandingCSS({ name: workspaceName, theme: { light: lightTheme, dark: darkTheme, font_family: fontFamily } })
+  }, [themeLoaded, workspaceName, lightTheme, darkTheme, fontFamily])
+
+  // Revert to the actually-saved theme if the admin navigates away (or
+  // switches tabs) without clicking Save.
+  useEffect(() => {
+    return () => { void refreshBranding() }
+  }, [refreshBranding])
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
@@ -313,15 +343,36 @@ function GeneralTab() {
               onChange={e => setWorkspaceName(e.target.value)}
             />
           </FormGroup>
-          <FormGroup label="Font Family" hint='CSS font stack, e.g. "Inter, sans-serif" — leave blank to keep the default vintage typefaces'>
-            <input
-              type="text"
-              className="settings-input"
-              placeholder="Inter, system-ui, sans-serif"
-              value={fontFamily}
+          <FormGroup label="Font Family" hint="Applied across the whole dashboard — pick Custom… to enter your own CSS font stack">
+            <select
+              className="settings-select"
+              value={customFont ? CUSTOM_FONT_VALUE : fontFamily}
               disabled={!can('team:manage')}
-              onChange={e => setFontFamily(e.target.value)}
-            />
+              onChange={e => {
+                const v = e.target.value
+                if (v === CUSTOM_FONT_VALUE) {
+                  setCustomFont(true)
+                } else {
+                  setCustomFont(false)
+                  setFontFamily(v)
+                }
+              }}
+            >
+              {FONT_PRESETS.map(p => (
+                <option key={p.label} value={p.value}>{p.label}</option>
+              ))}
+              <option value={CUSTOM_FONT_VALUE}>Custom…</option>
+            </select>
+            {customFont && (
+              <input
+                type="text"
+                className="settings-input mt-2"
+                placeholder='e.g. "Fira Sans", sans-serif'
+                value={fontFamily}
+                disabled={!can('team:manage')}
+                onChange={e => setFontFamily(e.target.value)}
+              />
+            )}
           </FormGroup>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
