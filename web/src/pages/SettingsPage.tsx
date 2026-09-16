@@ -434,6 +434,7 @@ function GeneralTab() {
           <div className="space-y-4">
             <UsageBar label="CI jobs analyzed" value={usage.jobs_this_month ?? 0} max={usage.max_jobs_per_month ?? 0} />
             <UsageBar label="Connected repositories" value={usage.repos_connected ?? 0} max={usage.max_repos ?? 0} />
+            <UsageBar label="Team members" value={usage.members_count ?? 0} max={usage.max_members ?? 0} />
             <p className="text-sm text-[var(--text-mid)]">
               You're on the <strong>{usage.plan_name ?? 'Free'}</strong> plan.{' '}
               <button type="button" onClick={() => setQuoteOpen(true)} className="text-[var(--gold)] font-medium hover:underline">

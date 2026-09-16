@@ -20,12 +20,13 @@ export function UsageCapBanner() {
 
   const jobsPct = usage.max_jobs_per_month ? (usage.jobs_this_month ?? 0) / usage.max_jobs_per_month : 0
   const reposPct = usage.max_repos ? (usage.repos_connected ?? 0) / usage.max_repos : 0
-  const atCap = usage.jobs_at_cap || usage.repos_at_cap
-  const nearCap = !atCap && (jobsPct >= 0.8 || reposPct >= 0.8)
+  const membersPct = usage.max_members ? (usage.members_count ?? 0) / usage.max_members : 0
+  const atCap = usage.jobs_at_cap || usage.repos_at_cap || usage.members_at_cap
+  const nearCap = !atCap && (jobsPct >= 0.8 || reposPct >= 0.8 || membersPct >= 0.8)
 
   if (!atCap && !nearCap) return null
 
-  const reason = usage.jobs_at_cap ? 'jobs_per_month' : usage.repos_at_cap ? 'repos' : undefined
+  const reason = usage.jobs_at_cap ? 'jobs_per_month' : usage.repos_at_cap ? 'repos' : usage.members_at_cap ? 'members' : undefined
 
   return (
     <>
@@ -38,8 +39,8 @@ export function UsageCapBanner() {
       >
         <span className="font-medium">
           {atCap
-            ? `You've reached the ${usage.plan_name ?? 'Free'} plan limit for ${usage.jobs_at_cap ? 'jobs analyzed this month' : 'connected repositories'}.`
-            : `You're approaching the ${usage.plan_name ?? 'Free'} plan limit (${usage.jobs_this_month ?? 0}/${usage.max_jobs_per_month} jobs this month, ${usage.repos_connected ?? 0}/${usage.max_repos} repos).`}
+            ? `You've reached the ${usage.plan_name ?? 'Free'} plan limit for ${usage.jobs_at_cap ? 'jobs analyzed this month' : usage.repos_at_cap ? 'connected repositories' : 'team members'}.`
+            : `You're approaching the ${usage.plan_name ?? 'Free'} plan limit (${usage.jobs_this_month ?? 0}/${usage.max_jobs_per_month} jobs this month, ${usage.repos_connected ?? 0}/${usage.max_repos} repos, ${usage.members_count ?? 0}/${usage.max_members} members).`}
         </span>
         <button
           onClick={() => setQuoteOpen(true)}

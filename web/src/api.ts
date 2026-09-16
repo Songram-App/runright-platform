@@ -230,8 +230,11 @@ export interface UsageSummary {
   max_jobs_per_month?: number
   repos_connected?: number
   max_repos?: number
+  members_count?: number
+  max_members?: number
   jobs_at_cap?: boolean
   repos_at_cap?: boolean
+  members_at_cap?: boolean
 }
 
 export const fetchUsage = (): Promise<UsageSummary> =>
@@ -242,7 +245,7 @@ export interface QuoteRequestInput {
   email: string
   company?: string
   message?: string
-  reason?: 'jobs_per_month' | 'repos' | 'proactive'
+  reason?: 'jobs_per_month' | 'repos' | 'members' | 'proactive'
 }
 
 export const submitQuoteRequest = (input: QuoteRequestInput): Promise<{ id: string; status: string }> =>

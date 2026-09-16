@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -489,6 +490,10 @@ func (s *Server) ssoCallback(c *gin.Context) {
 	// Create or update user in database
 	user, err := s.upsertSSOUser(c.Request.Context(), providerName, gothUser)
 	if err != nil {
+		if errors.Is(err, errSeatLimitReached) {
+			c.JSON(http.StatusPaymentRequired, gin.H{"error": "seat limit reached for the current plan — ask an admin to upgrade or remove a user"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save user"})
 		return
 	}
@@ -557,6 +562,10 @@ func (s *Server) validateSSODomain(ctx context.Context, provider, email string) 
 
 // upsertSSOUser creates or updates an SSO user.
 func (s *Server) upsertSSOUser(ctx context.Context, provider string, gothUser goth.User) (*SSOUser, error) {
+	if err := s.checkSeatCap(ctx, gothUser.Email); err != nil {
+		return nil, err
+	}
+
 	var defaultRole string
 	err := s.db.QueryRowContext(ctx, `
 		SELECT default_role FROM sso_providers 

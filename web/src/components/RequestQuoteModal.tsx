@@ -10,6 +10,7 @@ interface RequestQuoteModalProps {
 const REASON_COPY: Record<string, string> = {
   jobs_per_month: "you've hit the Free plan's monthly job limit",
   repos: "you've hit the Free plan's connected-repository limit",
+  members: "you've hit the Free plan's team member limit",
   proactive: "you're interested in a paid plan",
 }
 

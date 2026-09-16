@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -183,6 +184,10 @@ func (s *Server) handleGitHubOAuthCallback(c *gin.Context) {
 	// Store the user info and token in the session
 	sessionToken, err := s.createGitHubSession(user, token)
 	if err != nil {
+		if errors.Is(err, errSeatLimitReached) {
+			c.JSON(http.StatusPaymentRequired, gin.H{"error": "seat limit reached for the current plan — ask an admin to upgrade or remove a user"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to create session: %v", err)})
 		return
 	}
@@ -211,6 +216,10 @@ func (s *Server) createGitHubSession(user *github.User, token *oauth2.Token) (st
 		email := user.GetEmail()
 		if email == "" {
 			email = fmt.Sprintf("%s@users.noreply.github.com", user.GetLogin())
+		}
+
+		if capErr := s.checkSeatCap(context.Background(), email); capErr != nil {
+			return "", capErr
 		}
 
 		err = s.db.QueryRow(`

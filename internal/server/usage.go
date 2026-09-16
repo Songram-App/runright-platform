@@ -2,10 +2,15 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
+
+// errSeatLimitReached is returned by user-creation paths (SSO login, GitHub
+// login) when adding a genuinely new user would exceed this plan's seat cap.
+var errSeatLimitReached = errors.New("seat limit reached for the current plan")
 
 // getUsageSummary reports this instance's current metered usage against its
 // plan limits. Self-hosted deployments (s.plan == "") always report
@@ -25,6 +30,7 @@ func (s *Server) getUsageSummary(c *gin.Context) {
 	}
 
 	jobsThisMonth, reposConnected := s.currentJobAndRepoCounts(ctx)
+	memberCount := s.currentMemberCount(ctx)
 
 	c.JSON(http.StatusOK, gin.H{
 		"metered":            true,
@@ -34,8 +40,11 @@ func (s *Server) getUsageSummary(c *gin.Context) {
 		"max_jobs_per_month": limit.MaxJobsPerMonth,
 		"repos_connected":    reposConnected,
 		"max_repos":          limit.MaxRepos,
+		"members_count":      memberCount,
+		"max_members":        limit.MaxMembers,
 		"jobs_at_cap":        limit.MaxJobsPerMonth > 0 && jobsThisMonth >= limit.MaxJobsPerMonth,
 		"repos_at_cap":       limit.MaxRepos > 0 && reposConnected >= limit.MaxRepos,
+		"members_at_cap":     limit.MaxMembers > 0 && memberCount >= limit.MaxMembers,
 	})
 }
 
@@ -51,6 +60,42 @@ func (s *Server) currentJobAndRepoCounts(ctx context.Context) (jobsThisMonth, re
 		`SELECT COUNT(DISTINCT repository) FROM jobs WHERE repository IS NOT NULL AND repository != ''`,
 	).Scan(&reposConnected)
 	return
+}
+
+// currentMemberCount returns the number of distinct dashboard users
+// (sso_users) — the actual user roster for a RunRight Cloud tenant, which
+// does not use the separate teams/team_members system.
+func (s *Server) currentMemberCount(ctx context.Context) (count int) {
+	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sso_users`).Scan(&count)
+	return
+}
+
+// checkSeatCap returns errSeatLimitReached if creating a brand-new dashboard
+// user for this email would exceed the plan's seat cap. An email that
+// already has an sso_users row (someone logging back in) is never blocked.
+// Fails open on any lookup error — a seat-cap bug must never lock everyone
+// out of their own dashboard.
+func (s *Server) checkSeatCap(ctx context.Context, email string) error {
+	if s.plan == "" || email == "" {
+		return nil
+	}
+	limit, ok := plans[s.plan]
+	if !ok || limit.MaxMembers == 0 {
+		return nil
+	}
+
+	var alreadyExists bool
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM sso_users WHERE email = $1)`, email,
+	).Scan(&alreadyExists); err != nil || alreadyExists {
+		return nil
+	}
+
+	count := s.currentMemberCount(ctx)
+	if count >= limit.MaxMembers {
+		return errSeatLimitReached
+	}
+	return nil
 }
 
 // planCapReason checks whether ingesting a job with the given job_id /
