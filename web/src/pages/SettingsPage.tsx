@@ -4,6 +4,7 @@ import { RequestQuoteModal } from '../components/RequestQuoteModal'
 import { CURRENCY_OPTIONS, type CurrencyCode, useCurrencyPreference } from '../currency'
 import type { SSOConfig, SSOProviderType, SSOUser, Role } from '../types'
 import { useUser } from '../App'
+import { useBranding } from '../contexts/BrandingContext'
 import { usePagination } from '../hooks/usePagination'
 import { ListControls } from '../components/ListControls'
 
@@ -128,6 +129,7 @@ export default function SettingsPage() {
 // === General Settings Tab ===
 function GeneralTab() {
   const { can } = useUser()
+  const { refresh: refreshBranding } = useBranding()
   const { currency, setCurrency } = useCurrencyPreference()
   const [settings, setSettings] = useState<UserSettings>({
     otel_endpoint: '',
@@ -142,6 +144,8 @@ function GeneralTab() {
 
   const [workspaceName, setWorkspaceName] = useState('')
   const [accentColor, setAccentColor] = useState('')
+  const [logoDataUrl, setLogoDataUrl] = useState('')
+  const [logoError, setLogoError] = useState('')
   const [workspaceSaved, setWorkspaceSaved] = useState(false)
   const [workspaceError, setWorkspaceError] = useState('')
 
@@ -168,7 +172,7 @@ function GeneralTab() {
       }
     })()
     fetchWorkspaceSettings()
-      .then(ws => { setWorkspaceName(ws.name); setAccentColor(ws.accent_color ?? '') })
+      .then(ws => { setWorkspaceName(ws.name); setAccentColor(ws.accent_color ?? ''); setLogoDataUrl(ws.logo_url ?? '') })
       .catch(() => { /* fall back to placeholder */ })
     fetchUsage()
       .then(setUsage)
@@ -206,12 +210,32 @@ function GeneralTab() {
     e.preventDefault()
     setWorkspaceError('')
     try {
-      await updateWorkspaceSettings({ name: workspaceName, accent_color: accentColor })
+      await updateWorkspaceSettings({ name: workspaceName, accent_color: accentColor, logo_url: logoDataUrl })
       setWorkspaceSaved(true)
       setTimeout(() => setWorkspaceSaved(false), 2500)
+      await refreshBranding() // applies the new accent color / logo / name everywhere immediately
     } catch {
       setWorkspaceError('Unable to save workspace name.')
     }
+  }
+
+  const MAX_LOGO_BYTES = 350 * 1024
+
+  function handleLogoFile(file: File | undefined) {
+    setLogoError('')
+    if (!file) return
+    if (!/^image\/(png|jpeg|webp|svg\+xml)$/.test(file.type)) {
+      setLogoError('Logo must be a PNG, JPEG, WebP, or SVG image.')
+      return
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      setLogoError('Logo is too large — please use an image under 350KB.')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => setLogoDataUrl(String(reader.result ?? ''))
+    reader.onerror = () => setLogoError('Unable to read that file.')
+    reader.readAsDataURL(file)
   }
 
   async function saveAISettings(e: React.FormEvent) {
@@ -263,11 +287,11 @@ function GeneralTab() {
               onChange={e => setWorkspaceName(e.target.value)}
             />
           </FormGroup>
-          <FormGroup label="Accent Color" hint="Optional brand color (used in future theming)">
+          <FormGroup label="Accent Color" hint="Used for buttons, links, and highlights across the whole dashboard">
             <div className="flex items-center gap-3">
               <input
                 type="color"
-                value={accentColor || '#c9a227'}
+                value={accentColor || '#B8860B'}
                 disabled={!can('team:manage')}
                 onChange={e => setAccentColor(e.target.value)}
                 className="w-10 h-10 rounded border border-[var(--border)] bg-transparent cursor-pointer disabled:cursor-not-allowed"
@@ -275,16 +299,42 @@ function GeneralTab() {
               <input
                 type="text"
                 className="settings-input flex-1"
-                placeholder="#c9a227"
+                placeholder="#B8860B"
                 value={accentColor}
                 disabled={!can('team:manage')}
                 onChange={e => setAccentColor(e.target.value)}
               />
             </div>
           </FormGroup>
+          <FormGroup label="Logo" hint="PNG, JPEG, WebP, or SVG — max 350KB">
+            <div className="flex items-center gap-4">
+              {logoDataUrl && (
+                <img src={logoDataUrl} alt="" className="h-12 w-12 object-contain rounded border border-[var(--border)] bg-[var(--paper)] p-1" />
+              )}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                disabled={!can('team:manage')}
+                onChange={e => handleLogoFile(e.target.files?.[0])}
+                className="text-sm text-[var(--text-mid)] file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border file:border-[var(--border)] file:bg-[var(--paper)] file:text-[var(--text)] file:text-sm file:cursor-pointer disabled:opacity-60"
+              />
+              {logoDataUrl && can('team:manage') && (
+                <button type="button" onClick={() => setLogoDataUrl('')} className="text-sm text-red-600 dark:text-red-400 hover:underline">
+                  Remove
+                </button>
+              )}
+            </div>
+            {logoError && <p className="text-xs text-[var(--red)] mt-1.5">{logoError}</p>}
+          </FormGroup>
+
+          <div>
+            <p className="block text-sm font-medium text-[var(--text-mid)] mb-2">Preview</p>
+            <BrandingPreview name={workspaceName} accentColor={accentColor} logoUrl={logoDataUrl} />
+          </div>
+
           {workspaceError && <ErrorMessage message={workspaceError} />}
           <div className="flex items-center gap-4">
-            <button type="submit" className="settings-btn-primary" disabled={!can('team:manage')}>Save Name</button>
+            <button type="submit" className="settings-btn-primary" disabled={!can('team:manage')}>Save Branding</button>
             {workspaceSaved && <span className="text-sm text-green-600 dark:text-green-400">Saved!</span>}
           </div>
         </form>
@@ -1600,6 +1650,31 @@ function FormGroup({ label, hint, children, className = '' }: { label: string; h
 
 function LoadingState() {
   return <div className="text-sm text-[var(--text-light)] py-8 text-center">Loading...</div>
+}
+
+// Renders a mini sidebar/button mockup using the PENDING (unsaved) branding
+// values, scoped to this subtree only via a local --gold override so it never
+// touches the real app theme until the admin actually clicks Save.
+function BrandingPreview({ name, accentColor, logoUrl }: { name: string; accentColor: string; logoUrl: string }) {
+  const style = { '--gold': accentColor || '#B8860B' } as React.CSSProperties
+  return (
+    <div style={style} className="flex flex-col sm:flex-row gap-3">
+      <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-[#2C1A0E] flex-1">
+        {logoUrl ? (
+          <img src={logoUrl} alt="" className="h-6 w-6 object-contain rounded" />
+        ) : (
+          <div className="h-6 w-6 rounded-full border-2 border-[#FBF0DC]" />
+        )}
+        <span className="font-deco text-lg tracking-[2px] text-[#FBF0DC]">{(name || 'RunRight').toUpperCase()}</span>
+      </div>
+      <div className="flex items-center gap-3 px-4 py-3 rounded-lg border border-[var(--border)] bg-[var(--paper)]">
+        <button type="button" tabIndex={-1} className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white" style={{ background: 'var(--gold)' }}>
+          Primary Button
+        </button>
+        <span className="text-xs font-medium" style={{ color: 'var(--gold)' }}>Accent text</span>
+      </div>
+    </div>
+  )
 }
 
 function UsageBar({ label, value, max }: { label: string; value: number; max: number }) {

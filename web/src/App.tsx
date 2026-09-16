@@ -20,7 +20,8 @@ import RunHistoryPage from './pages/RunHistoryPage'
 import ChatWidget from './components/ChatWidget'
 import { UsageCapBanner } from './components/UsageCapBanner'
 import { PageDataProvider } from './contexts/PageDataContext'
-import { logout, fetchCurrentUser, fetchWorkspaceSettings } from './api'
+import { BrandingProvider, useBranding } from './contexts/BrandingContext'
+import { logout, fetchCurrentUser } from './api'
 import type { CurrentUser } from './types'
 import LogoMark from './components/LogoMark'
 import './App.css'
@@ -42,9 +43,11 @@ export const useUser = () => useContext(UserContext)
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AppRoutes />
-    </BrowserRouter>
+    <BrandingProvider>
+      <BrowserRouter>
+        <AppRoutes />
+      </BrowserRouter>
+    </BrandingProvider>
   )
 }
 
@@ -372,13 +375,7 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
   )
   // On desktop the sidebar is always "open"; on mobile it's a drawer.
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [workspaceName, setWorkspaceName] = useState('RUNRIGHT')
-
-  useEffect(() => {
-    fetchWorkspaceSettings()
-      .then(ws => { if (ws.name) setWorkspaceName(ws.name.toUpperCase()) })
-      .catch(() => { /* keep default branding */ })
-  }, [])
+  const { name: workspaceName, logoUrl } = useBranding()
 
   // Sync dark-mode class to <html> so Tailwind dark: variants work
   useEffect(() => {
@@ -439,8 +436,12 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
           className="flex flex-col items-start gap-0.5 pb-6 border-b border-[var(--sidebar-border)] mb-5 no-underline"
           aria-label="RunRight home"
         >
-          <LogoMark size={22} color="#FBF0DC" />
-          <span className={["font-deco text-[22px] text-[var(--sidebar-fg)] tracking-[3px] leading-tight", desktopCollapsed ? 'md:hidden' : ''].join(' ')}>{workspaceName}</span>
+          {logoUrl ? (
+            <img src={logoUrl} alt="" className="h-[22px] w-[22px] object-contain rounded" />
+          ) : (
+            <LogoMark size={22} color="#FBF0DC" />
+          )}
+          <span className={["font-deco text-[22px] text-[var(--sidebar-fg)] tracking-[3px] leading-tight", desktopCollapsed ? 'md:hidden' : ''].join(' ')}>{workspaceName.toUpperCase()}</span>
         </Link>
 
         <SideLink to="/app" end onClick={closeMobile} collapsed={desktopCollapsed} icon={JobsIcon}>Jobs</SideLink>
@@ -478,7 +479,8 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
           >
             {mobileOpen ? <CloseIcon /> : <MenuIcon />}
           </button>
-          <span className="font-deco text-lg tracking-[2px] text-[var(--text)]">{workspaceName}</span>
+          {logoUrl && <img src={logoUrl} alt="" className="h-5 w-5 object-contain rounded" />}
+          <span className="font-deco text-lg tracking-[2px] text-[var(--text)]">{workspaceName.toUpperCase()}</span>
         </div>
 
         <UsageCapBanner />

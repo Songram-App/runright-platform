@@ -195,6 +195,7 @@ export const fetchGitHubStatus = (): Promise<GitHubAppStatus> =>
 export interface WorkspaceSettings {
   name: string
   accent_color?: string
+  logo_url?: string
 }
 
 export const fetchWorkspaceSettings = (): Promise<WorkspaceSettings> =>
