@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -23,12 +25,34 @@ type planLimits struct {
 	MaxRepos        int // distinct repositories with at least one job
 }
 
+func envInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return fallback
+}
+
 // plans is the fixed catalog of subscription tiers offered to customers.
 // "free" requires no Stripe price — it's the default for every new team, and
 // the default plan assigned to every new RunRight Cloud tenant on signup.
+// Limits are overridable via env vars (this file is public open-source
+// source, so the mechanism is public but the actual configured numbers on
+// any given deployment don't have to match these defaults).
 var plans = map[string]planLimits{
-	"free":       {Name: "Free", MaxMembers: 3, MaxJobsPerMonth: 500, MaxRepos: 5},
-	"pro":        {Name: "Pro", MaxMembers: 25, MaxJobsPerMonth: 10000, MaxRepos: 50},
+	"free": {
+		Name:            "Free",
+		MaxMembers:      envInt("RUNRIGHT_FREE_MAX_MEMBERS", 3),
+		MaxJobsPerMonth: envInt("RUNRIGHT_FREE_MAX_JOBS", 500),
+		MaxRepos:        envInt("RUNRIGHT_FREE_MAX_REPOS", 5),
+	},
+	"pro": {
+		Name:            "Pro",
+		MaxMembers:      envInt("RUNRIGHT_PRO_MAX_MEMBERS", 25),
+		MaxJobsPerMonth: envInt("RUNRIGHT_PRO_MAX_JOBS", 10000),
+		MaxRepos:        envInt("RUNRIGHT_PRO_MAX_REPOS", 50),
+	},
 	"enterprise": {Name: "Enterprise", MaxMembers: 0, MaxJobsPerMonth: 0, MaxRepos: 0},
 }
 
