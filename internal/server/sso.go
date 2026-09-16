@@ -827,6 +827,10 @@ func (s *Server) ssoTestConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if s.ssoMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "SSO is not enabled on this instance", "valid": false})
+		return
+	}
 
 	testMgr := newSSOManager(s.db, s.ssoMgr.baseURL)
 	provider, err := testMgr.createProvider(cfg)

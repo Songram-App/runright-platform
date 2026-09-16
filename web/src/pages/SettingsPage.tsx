@@ -560,6 +560,9 @@ function SSOTab() {
   const [error, setError] = useState('')
   const [editing, setEditing] = useState<Partial<SSOConfig> | null>(null)
   const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     loadConfigs()
@@ -577,6 +580,7 @@ function SSOTab() {
   }
 
   function startNew() {
+    setTestResult(null)
     setEditing({
       provider_type: 'google',
       name: '',
@@ -586,6 +590,33 @@ function SSOTab() {
       scopes: 'email,profile',
       default_role: 'viewer',
     })
+  }
+
+  function callbackURLFor(providerType?: string): string {
+    if (typeof window === 'undefined' || !providerType) return ''
+    return `${window.location.origin}/api/v1/sso/callback/${providerType}`
+  }
+
+  async function copyCallbackURL() {
+    try {
+      await navigator.clipboard.writeText(callbackURLFor(editing?.provider_type))
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* clipboard access denied — not critical, URL is still visible to select/copy manually */ }
+  }
+
+  async function handleTest() {
+    if (!editing) return
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const result = await testSSOConfig(editing)
+      setTestResult({ ok: result.valid, message: result.valid ? (result.message ?? 'Configuration looks valid') : (result.error ?? 'Configuration is invalid') })
+    } catch {
+      setTestResult({ ok: false, message: 'Unable to test this configuration' })
+    } finally {
+      setTesting(false)
+    }
   }
 
   async function handleSave() {
@@ -626,6 +657,24 @@ function SSOTab() {
                   <option key={opt.value} value={opt.value}>{opt.label} - {opt.description}</option>
                 ))}
               </select>
+            </FormGroup>
+
+            <FormGroup
+              label={editing.provider_type === 'saml' ? 'ACS / Callback URL' : 'Redirect URI'}
+              hint={`Paste this into your ${PROVIDER_OPTIONS.find(p => p.value === editing.provider_type)?.label ?? 'identity'} app registration`}
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={callbackURLFor(editing.provider_type)}
+                  onFocus={e => e.target.select()}
+                  className="settings-input flex-1 text-[var(--text-mid)]"
+                />
+                <button type="button" onClick={() => void copyCallbackURL()} className="settings-btn-secondary whitespace-nowrap">
+                  {copied ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
             </FormGroup>
 
             <FormGroup label="Display Name">
@@ -710,10 +759,18 @@ function SSOTab() {
             </FormGroup>
 
             {error && <ErrorMessage message={error} />}
+            {testResult && (
+              <p className={`text-sm ${testResult.ok ? 'text-green-600 dark:text-green-400' : 'text-[var(--red)]'}`}>
+                {testResult.message}
+              </p>
+            )}
 
             <div className="flex gap-3 pt-2">
               <button onClick={handleSave} disabled={saving || !can('team:manage')} title={!can('team:manage') ? 'Requires admin or owner role' : undefined} className="settings-btn-primary">
                 {saving ? 'Saving...' : 'Save Provider'}
+              </button>
+              <button onClick={() => void handleTest()} disabled={testing || !can('team:manage')} className="settings-btn-secondary">
+                {testing ? 'Testing...' : 'Test Connection'}
               </button>
               <button onClick={() => setEditing(null)} className="settings-btn-secondary">
                 Cancel
@@ -747,7 +804,7 @@ function SSOTab() {
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <button onClick={() => setEditing(config)} className="text-sm text-[var(--text-mid)] hover:text-[var(--text)]">Edit</button>
+                    <button onClick={() => { setTestResult(null); setEditing(config) }} className="text-sm text-[var(--text-mid)] hover:text-[var(--text)]">Edit</button>
                     <button onClick={() => handleDelete(config.id!)} className="text-sm text-red-500 hover:text-red-700">Delete</button>
                   </div>
                 </div>

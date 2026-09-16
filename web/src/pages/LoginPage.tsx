@@ -118,14 +118,6 @@ export default function LoginPage({ onLogin }: Props) {
     }
   }
 
-  function handleSSOLogin() {
-    // If single provider, go directly. Otherwise use first one (org's primary SSO)
-    const provider = ssoProviders[0]
-    if (provider) {
-      window.location.href = provider.login_url
-    }
-  }
-
   const hasSSO = ssoProviders.length > 0
 
   return (
@@ -170,20 +162,17 @@ export default function LoginPage({ onLogin }: Props) {
             <div className="font-deco text-[22px] tracking-[4px] mt-2">{workspaceName.toUpperCase()}</div>
           </div>
 
-          {/* Single SSO Button */}
-          {!loadingSSO && hasSSO && (
-            <button
-              type="button"
-              onClick={handleSSOLogin}
+          {/* One button per configured SSO provider — admins can enable more than one */}
+          {!loadingSSO && ssoProviders.map(provider => (
+            <a
+              key={provider.provider_type}
+              href={provider.login_url}
               className="w-full flex items-center justify-center gap-3 py-3.5 px-4 bg-[#2C1A0E] dark:bg-[#F5E4C8] text-[#FBF0DC] dark:text-[#2C1A0E] hover:bg-[#3D2810] dark:hover:bg-[#E8D4B8] transition-colors font-deco text-[15px] tracking-[2px] mb-3"
             >
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                <path d="M7 11V7a5 5 0 0110 0v4"/>
-              </svg>
-              <span>Sign in with SSO</span>
-            </button>
-          )}
+              <ProviderIcon type={provider.provider_type} />
+              <span>Sign in with {provider.name}</span>
+            </a>
+          ))}
 
           {/* GitHub OAuth login */}
           {githubEnabled && (
