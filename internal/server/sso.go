@@ -308,8 +308,10 @@ func (s *Server) ssoListProviders(c *gin.Context) {
 		})
 	}
 
-	// If no providers configured, add demo for easy testing
-	if len(providers) == 0 {
+	// If no providers configured, offer the demo provider for easy local
+	// testing — but never on a managed Cloud tenant, where it would be an
+	// unauthenticated instant-admin backdoor on a real customer's instance.
+	if len(providers) == 0 && os.Getenv("RUNRIGHT_TENANT_SLUG") == "" {
 		providers = append(providers, gin.H{
 			"provider_type": "demo",
 			"name":          "SSO",
@@ -324,8 +326,13 @@ func (s *Server) ssoListProviders(c *gin.Context) {
 func (s *Server) ssoLogin(c *gin.Context) {
 	providerName := c.Param("provider")
 
-	// Handle demo provider - instant login without OAuth
+	// Handle demo provider - instant login without OAuth, self-hosted only
+	// (see ssoListProviders — a managed Cloud tenant must never expose this).
 	if providerName == string(SSOProviderDemo) {
+		if os.Getenv("RUNRIGHT_TENANT_SLUG") != "" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "unknown provider: demo"})
+			return
+		}
 		s.ssoDemoLogin(c)
 		return
 	}

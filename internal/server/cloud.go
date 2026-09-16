@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -71,14 +72,61 @@ func (s *Server) startCloudOAuthState(c *gin.Context) (string, bool) {
 	return state, true
 }
 
-func (s *Server) verifyCloudOAuthState(c *gin.Context) bool {
+func (s *Server) verifyCloudOAuthState(c *gin.Context) (desiredSlug string, ok bool) {
 	cookie, err := c.Cookie(cloudStateCookie)
 	c.SetCookie(cloudStateCookie, "", -1, "/", "", isSecureContext(c), true)
 	if err != nil || cookie == "" {
-		return false
+		return "", false
 	}
 	queryState := strings.TrimPrefix(c.Query("state"), cloudStatePrefix)
-	return subtle.ConstantTimeCompare([]byte(cookie), []byte(queryState)) == 1
+	desiredSlug, random := decodeCloudState(queryState)
+	if subtle.ConstantTimeCompare([]byte(cookie), []byte(random)) != 1 {
+		return "", false
+	}
+	return desiredSlug, true
+}
+
+// encodeCloudState/decodeCloudState let the signup chooser (CloudStartPage)
+// pass along a customer-requested workspace name (e.g. "walmart") through the
+// OAuth round trip, so the resulting tenant slug can be rr-walmart instead of
+// an unrelated random one — much easier to recognize operationally later.
+func encodeCloudState(desiredSlug, random string) string {
+	if desiredSlug == "" {
+		return random
+	}
+	return desiredSlug + ":" + random
+}
+
+func decodeCloudState(raw string) (desiredSlug, random string) {
+	if idx := strings.LastIndex(raw, ":"); idx != -1 {
+		return raw[:idx], raw[idx+1:]
+	}
+	return "", raw
+}
+
+// slugSanitizeRe/slugCollapseHyphenRe turn a free-typed company/workspace
+// name into a URL-safe slug fragment (rr-<slug>.fly.dev).
+var slugSanitizeRe = regexp.MustCompile(`[^a-z0-9-]+`)
+var slugCollapseHyphenRe = regexp.MustCompile(`-{2,}`)
+
+func sanitizeSlugCandidate(raw string) string {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	v = slugSanitizeRe.ReplaceAllString(v, "-")
+	v = slugCollapseHyphenRe.ReplaceAllString(v, "-")
+	v = strings.Trim(v, "-")
+	if len(v) > 30 {
+		v = strings.Trim(v[:30], "-")
+	}
+	return v
+}
+
+// reservedSlugs blocks names that would be confusing or collide with our own
+// infrastructure/routes if used as a tenant slug (rr-<slug>.fly.dev).
+var reservedSlugs = map[string]bool{
+	"www": true, "api": true, "app": true, "admin": true, "cloud": true,
+	"runright": true, "status": true, "health": true, "mail": true, "ftp": true,
+	"root": true, "system": true, "internal": true, "fly": true, "billing": true,
+	"support": true, "help": true, "assets": true, "static": true, "rr": true,
 }
 
 // --- GitHub signup (reuses the existing GitHub App OAuth credentials AND its
@@ -103,6 +151,7 @@ func (s *Server) cloudAuthGitHub(c *gin.Context) {
 	if !ok {
 		return
 	}
+	desiredSlug := sanitizeSlugCandidate(c.Query("slug"))
 	oauth2Cfg := &oauth2.Config{
 		ClientID:     ghCfg.ClientID,
 		ClientSecret: ghCfg.ClientSecret,
@@ -110,7 +159,7 @@ func (s *Server) cloudAuthGitHub(c *gin.Context) {
 		RedirectURL:  ghCfg.RedirectURL, // existing /api/v1/github/callback
 		Scopes:       []string{"read:user", "user:email"},
 	}
-	c.Redirect(http.StatusFound, oauth2Cfg.AuthCodeURL(cloudStatePrefix+state))
+	c.Redirect(http.StatusFound, oauth2Cfg.AuthCodeURL(cloudStatePrefix+encodeCloudState(desiredSlug, state)))
 }
 
 func (s *Server) cloudAuthGoogle(c *gin.Context) {
@@ -123,6 +172,7 @@ func (s *Server) cloudAuthGoogle(c *gin.Context) {
 	if !ok {
 		return
 	}
+	desiredSlug := sanitizeSlugCandidate(c.Query("slug"))
 	oauth2Cfg := &oauth2.Config{
 		ClientID:     cfg.googleClientID,
 		ClientSecret: cfg.googleClientSecret,
@@ -130,7 +180,7 @@ func (s *Server) cloudAuthGoogle(c *gin.Context) {
 		RedirectURL:  cfg.baseURL + "/api/v1/cloud/auth/google/callback",
 		Scopes:       []string{"openid", "email", "profile"},
 	}
-	c.Redirect(http.StatusFound, oauth2Cfg.AuthCodeURL(state))
+	c.Redirect(http.StatusFound, oauth2Cfg.AuthCodeURL(encodeCloudState(desiredSlug, state)))
 }
 
 func (s *Server) cloudAuthGoogleCallback(c *gin.Context) {
@@ -139,7 +189,8 @@ func (s *Server) cloudAuthGoogleCallback(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Google login is not configured"})
 		return
 	}
-	if !s.verifyCloudOAuthState(c) {
+	desiredSlug, ok := s.verifyCloudOAuthState(c)
+	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid or expired login attempt, please try again"})
 		return
 	}
@@ -180,12 +231,12 @@ func (s *Server) cloudAuthGoogleCallback(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse Google profile"})
 		return
 	}
-	s.cloudCompleteSignup(c, profile.Email, profile.Name, profile.Picture, "google", profile.Sub)
+	s.cloudCompleteSignup(c, profile.Email, profile.Name, profile.Picture, "google", profile.Sub, desiredSlug)
 }
 
 // --- Shared signup completion: upsert customer, ensure tenant, kick off provisioning ---
 
-func (s *Server) cloudCompleteSignup(c *gin.Context, email, name, avatarURL, provider, providerUID string) {
+func (s *Server) cloudCompleteSignup(c *gin.Context, email, name, avatarURL, provider, providerUID, desiredSlug string) {
 	ctx := c.Request.Context()
 	if email == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "your account has no accessible email address"})
@@ -213,7 +264,7 @@ func (s *Server) cloudCompleteSignup(c *gin.Context, email, name, avatarURL, pro
 	switch {
 	case err == sql.ErrNoRows:
 		var slugErr error
-		slug, slugErr = s.reserveTenantSlug(ctx)
+		slug, slugErr = s.reserveTenantSlugPreferred(ctx, desiredSlug)
 		if slugErr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to allocate a workspace"})
 			return
@@ -301,6 +352,55 @@ func (s *Server) reserveTenantSlug(ctx context.Context) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("could not allocate a unique workspace slug")
+}
+
+// reserveTenantSlugPreferred tries to honor a customer-requested workspace
+// name (e.g. "walmart" -> rr-walmart) before falling back to a fully random
+// slug. Tries the base name, then base-2/base-3/..., then base-<random>,
+// and only gives up on the request entirely (never on allocating a slug) if
+// every friendly variant is somehow taken.
+func (s *Server) reserveTenantSlugPreferred(ctx context.Context, desired string) (string, error) {
+	base := sanitizeSlugCandidate(desired)
+	if base == "" || len(base) < 2 || reservedSlugs[base] {
+		return s.reserveTenantSlug(ctx)
+	}
+
+	slugTaken := func(candidate string) (bool, error) {
+		var exists bool
+		err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM cloud_tenants WHERE slug = $1)`, candidate).Scan(&exists)
+		return exists, err
+	}
+
+	candidates := []string{base}
+	for i := 2; i <= 5; i++ {
+		candidates = append(candidates, fmt.Sprintf("%s-%d", base, i))
+	}
+	for _, candidate := range candidates {
+		taken, err := slugTaken(candidate)
+		if err != nil {
+			return "", err
+		}
+		if !taken {
+			return candidate, nil
+		}
+	}
+
+	for attempt := 0; attempt < 5; attempt++ {
+		suffix, err := randomToken(2)
+		if err != nil {
+			return "", err
+		}
+		candidate := fmt.Sprintf("%s-%s", base, suffix)
+		taken, err := slugTaken(candidate)
+		if err != nil {
+			return "", err
+		}
+		if !taken {
+			return candidate, nil
+		}
+	}
+	// Every friendly variant is taken — fall back rather than fail signup.
+	return s.reserveTenantSlug(ctx)
 }
 
 // --- Status polling + handoff page ---

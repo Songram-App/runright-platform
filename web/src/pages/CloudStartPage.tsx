@@ -18,6 +18,19 @@ const GoogleIcon = () => (
   </svg>
 )
 
+// Mirrors the backend's sanitizeSlugCandidate (cloud.go) so the preview the
+// customer sees matches what they'll actually get.
+function slugify(raw: string): string {
+  return raw
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 30)
+    .replace(/-+$/, '')
+}
+
 // The signup-method chooser for RunRight Cloud — linked from the marketing
 // site's CTAs. Talks only to JSON API endpoints (/api/v1/cloud/providers);
 // clicking a provider button is a real browser navigation to that
@@ -25,6 +38,7 @@ const GoogleIcon = () => (
 // LoginPage: light mode by default, with the same dark-mode toggle.
 export default function CloudStartPage() {
   const [providers, setProviders] = useState<{ github: boolean; google: boolean } | null>(null)
+  const [workspaceName, setWorkspaceName] = useState('')
   const [dark, setDark] = useState(() =>
     typeof window !== 'undefined' ? localStorage.getItem('rr-theme') === 'dark' : false
   )
@@ -69,12 +83,27 @@ export default function CloudStartPage() {
             <div className="font-deco text-[20px] tracking-[3px] mt-2">RUNRIGHT CLOUD</div>
           </div>
           <h1 className="text-lg font-bold text-[var(--text)] mb-2">Create your workspace</h1>
-          <p className="text-[13px] text-[var(--text-mid)] mb-7 leading-relaxed">
+          <p className="text-[13px] text-[var(--text-mid)] mb-5 leading-relaxed">
             Pick how you'd like to sign in. We'll spin up a dedicated, isolated instance just for you.
           </p>
 
+          <div className="text-left mb-5">
+            <label className="block text-xs font-medium text-[var(--text-mid)] mb-1.5">Workspace name (optional)</label>
+            <input
+              type="text"
+              value={workspaceName}
+              onChange={e => setWorkspaceName(e.target.value)}
+              placeholder="e.g. Walmart"
+              maxLength={40}
+              className="w-full px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--paper)] text-sm text-[var(--text)]"
+            />
+            <p className="text-xs text-[var(--text-light)] mt-1.5">
+              Your URL: rr-{slugify(workspaceName) || '\u2026'}.fly.dev — leave blank for a random name
+            </p>
+          </div>
+
           <a
-            href="/api/v1/cloud/auth/github"
+            href={`/api/v1/cloud/auth/github${slugify(workspaceName) ? `?slug=${encodeURIComponent(slugify(workspaceName))}` : ''}`}
             className="w-full flex items-center justify-center gap-3 py-3.5 px-4 bg-[#2C1A0E] dark:bg-[#F5E4C8] text-[#FBF0DC] dark:text-[#2C1A0E] hover:bg-[#3D2810] dark:hover:bg-[#E8D4B8] transition-colors font-deco text-[15px] tracking-[2px] mb-3"
           >
             <GitHubIcon />
@@ -83,7 +112,7 @@ export default function CloudStartPage() {
 
           {providers?.google ? (
             <a
-              href="/api/v1/cloud/auth/google"
+              href={`/api/v1/cloud/auth/google${slugify(workspaceName) ? `?slug=${encodeURIComponent(slugify(workspaceName))}` : ''}`}
               className="w-full flex items-center justify-center gap-3 py-3.5 px-4 border border-[var(--border)] text-[var(--text)] hover:bg-[var(--cream-alt)] transition-colors font-deco text-[15px] tracking-[2px]"
             >
               <GoogleIcon />

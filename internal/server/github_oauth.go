@@ -121,7 +121,8 @@ func (s *Server) handleGitHubOAuthCallback(c *gin.Context) {
 	// normal dashboard login (GitHub Apps only allow one exact callback);
 	// it's distinguished by a "cloud:" prefix on the state param.
 	if strings.HasPrefix(c.Query("state"), cloudStatePrefix) {
-		if !s.verifyCloudOAuthState(c) {
+		desiredSlug, ok := s.verifyCloudOAuthState(c)
+		if !ok {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid or expired login attempt, please try again"})
 			return
 		}
@@ -131,7 +132,7 @@ func (s *Server) handleGitHubOAuthCallback(c *gin.Context) {
 			// AND a public/verified email exists; fall back to a stable address.
 			email = fmt.Sprintf("%d+%s@users.noreply.github.com", user.GetID(), user.GetLogin())
 		}
-		s.cloudCompleteSignup(c, email, user.GetName(), user.GetAvatarURL(), "github", fmt.Sprintf("%d", user.GetID()))
+		s.cloudCompleteSignup(c, email, user.GetName(), user.GetAvatarURL(), "github", fmt.Sprintf("%d", user.GetID()), desiredSlug)
 		return
 	}
 
