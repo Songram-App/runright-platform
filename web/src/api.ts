@@ -192,10 +192,26 @@ export const fetchGitHubStatus = (): Promise<GitHubAppStatus> =>
 
 // ── Workspace branding (instance name shown in sidebar/login) ───────────────
 
+export interface ThemePalette {
+  background?: string
+  surface?: string
+  text?: string
+  sidebar_bg?: string
+  sidebar_text?: string
+  accent?: string
+}
+
+export interface ThemeSettings {
+  light?: ThemePalette
+  dark?: ThemePalette
+  font_family?: string
+}
+
 export interface WorkspaceSettings {
   name: string
   accent_color?: string
   logo_url?: string
+  theme?: ThemeSettings
 }
 
 export const fetchWorkspaceSettings = (): Promise<WorkspaceSettings> =>

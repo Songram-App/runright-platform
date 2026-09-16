@@ -1,5 +1,5 @@
 import { useState, useEffect, type ReactNode } from 'react'
-import { fetchUserSettings, upsertUserSettings, fetchSSOConfigs, upsertSSOConfig, deleteSSOConfig, testSSOConfig, fetchUsers, updateUserRole, fetchRoles, createRole, updateRole, deleteRole, fetchWorkspaceSettings, updateWorkspaceSettings, fetchUsage, fetchAISettings, updateAISettings, deleteAISettings, type UserSettings, type UsageSummary, type AISettings } from '../api'
+import { fetchUserSettings, upsertUserSettings, fetchSSOConfigs, upsertSSOConfig, deleteSSOConfig, testSSOConfig, fetchUsers, updateUserRole, fetchRoles, createRole, updateRole, deleteRole, fetchWorkspaceSettings, updateWorkspaceSettings, fetchUsage, fetchAISettings, updateAISettings, deleteAISettings, type UserSettings, type UsageSummary, type AISettings, type ThemePalette } from '../api'
 import { RequestQuoteModal } from '../components/RequestQuoteModal'
 import { CURRENCY_OPTIONS, type CurrencyCode, useCurrencyPreference } from '../currency'
 import type { SSOConfig, SSOProviderType, SSOUser, Role } from '../types'
@@ -126,6 +126,18 @@ export default function SettingsPage() {
   )
 }
 
+// Built-in vintage theme defaults (see web/src/App.css :root / html.dark) —
+// used as color-picker placeholders and as preview fallbacks when a field is
+// left blank (blank means "don't override the built-in default").
+const LIGHT_DEFAULTS: Required<ThemePalette> = {
+  background: '#FBF0DC', surface: '#FFFDF7', text: '#2C1A0E',
+  sidebar_bg: '#2C1A0E', sidebar_text: '#FBF0DC', accent: '#B8860B',
+}
+const DARK_DEFAULTS: Required<ThemePalette> = {
+  background: '#130C05', surface: '#231810', text: '#F5E4C8',
+  sidebar_bg: '#231810', sidebar_text: '#F9E9CD', accent: '#B8860B',
+}
+
 // === General Settings Tab ===
 function GeneralTab() {
   const { can } = useUser()
@@ -143,7 +155,9 @@ function GeneralTab() {
   const [loading, setLoading] = useState(true)
 
   const [workspaceName, setWorkspaceName] = useState('')
-  const [accentColor, setAccentColor] = useState('')
+  const [lightTheme, setLightTheme] = useState<ThemePalette>({})
+  const [darkTheme, setDarkTheme] = useState<ThemePalette>({})
+  const [fontFamily, setFontFamily] = useState('')
   const [logoDataUrl, setLogoDataUrl] = useState('')
   const [logoError, setLogoError] = useState('')
   const [workspaceSaved, setWorkspaceSaved] = useState(false)
@@ -172,7 +186,15 @@ function GeneralTab() {
       }
     })()
     fetchWorkspaceSettings()
-      .then(ws => { setWorkspaceName(ws.name); setAccentColor(ws.accent_color ?? ''); setLogoDataUrl(ws.logo_url ?? '') })
+      .then(ws => {
+        setWorkspaceName(ws.name)
+        setLogoDataUrl(ws.logo_url ?? '')
+        const light = { ...ws.theme?.light }
+        if (!light.accent && ws.accent_color) light.accent = ws.accent_color // migrate the old single-field save
+        setLightTheme(light)
+        setDarkTheme(ws.theme?.dark ?? {})
+        setFontFamily(ws.theme?.font_family ?? '')
+      })
       .catch(() => { /* fall back to placeholder */ })
     fetchUsage()
       .then(setUsage)
@@ -210,10 +232,14 @@ function GeneralTab() {
     e.preventDefault()
     setWorkspaceError('')
     try {
-      await updateWorkspaceSettings({ name: workspaceName, accent_color: accentColor, logo_url: logoDataUrl })
+      await updateWorkspaceSettings({
+        name: workspaceName,
+        logo_url: logoDataUrl,
+        theme: { light: lightTheme, dark: darkTheme, font_family: fontFamily },
+      })
       setWorkspaceSaved(true)
       setTimeout(() => setWorkspaceSaved(false), 2500)
-      await refreshBranding() // applies the new accent color / logo / name everywhere immediately
+      await refreshBranding() // applies the new theme / logo / name everywhere immediately
     } catch {
       setWorkspaceError('Unable to save workspace name.')
     }
@@ -287,25 +313,34 @@ function GeneralTab() {
               onChange={e => setWorkspaceName(e.target.value)}
             />
           </FormGroup>
-          <FormGroup label="Accent Color" hint="Used for buttons, links, and highlights across the whole dashboard">
-            <div className="flex items-center gap-3">
-              <input
-                type="color"
-                value={accentColor || '#B8860B'}
-                disabled={!can('team:manage')}
-                onChange={e => setAccentColor(e.target.value)}
-                className="w-10 h-10 rounded border border-[var(--border)] bg-transparent cursor-pointer disabled:cursor-not-allowed"
-              />
-              <input
-                type="text"
-                className="settings-input flex-1"
-                placeholder="#B8860B"
-                value={accentColor}
-                disabled={!can('team:manage')}
-                onChange={e => setAccentColor(e.target.value)}
-              />
-            </div>
+          <FormGroup label="Font Family" hint='CSS font stack, e.g. "Inter, sans-serif" — leave blank to keep the default vintage typefaces'>
+            <input
+              type="text"
+              className="settings-input"
+              placeholder="Inter, system-ui, sans-serif"
+              value={fontFamily}
+              disabled={!can('team:manage')}
+              onChange={e => setFontFamily(e.target.value)}
+            />
           </FormGroup>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <ThemePaletteEditor
+              title="Light Mode"
+              palette={lightTheme}
+              onChange={setLightTheme}
+              disabled={!can('team:manage')}
+              defaults={LIGHT_DEFAULTS}
+            />
+            <ThemePaletteEditor
+              title="Dark Mode"
+              palette={darkTheme}
+              onChange={setDarkTheme}
+              disabled={!can('team:manage')}
+              defaults={DARK_DEFAULTS}
+            />
+          </div>
+
           <FormGroup label="Logo" hint="PNG, JPEG, WebP, or SVG — max 350KB">
             <div className="flex items-center gap-4">
               {logoDataUrl && (
@@ -329,7 +364,10 @@ function GeneralTab() {
 
           <div>
             <p className="block text-sm font-medium text-[var(--text-mid)] mb-2">Preview</p>
-            <BrandingPreview name={workspaceName} accentColor={accentColor} logoUrl={logoDataUrl} />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <BrandingPreview label="Light" name={workspaceName} palette={lightTheme} defaults={LIGHT_DEFAULTS} logoUrl={logoDataUrl} fontFamily={fontFamily} />
+              <BrandingPreview label="Dark" name={workspaceName} palette={darkTheme} defaults={DARK_DEFAULTS} logoUrl={logoDataUrl} fontFamily={fontFamily} dark />
+            </div>
           </div>
 
           {workspaceError && <ErrorMessage message={workspaceError} />}
@@ -1652,26 +1690,94 @@ function LoadingState() {
   return <div className="text-sm text-[var(--text-light)] py-8 text-center">Loading...</div>
 }
 
-// Renders a mini sidebar/button mockup using the PENDING (unsaved) branding
-// values, scoped to this subtree only via a local --gold override so it never
-// touches the real app theme until the admin actually clicks Save.
-function BrandingPreview({ name, accentColor, logoUrl }: { name: string; accentColor: string; logoUrl: string }) {
-  const style = { '--gold': accentColor || '#B8860B' } as React.CSSProperties
+// Renders a mini sidebar/button/background mockup using the PENDING (unsaved)
+// theme values for one mode, scoped to this subtree only via inline CSS
+// custom properties so it never touches the real app theme until Save.
+function BrandingPreview({
+  label, name, palette, defaults, logoUrl, fontFamily, dark,
+}: {
+  label: string
+  name: string
+  palette: ThemePalette
+  defaults: Required<ThemePalette>
+  logoUrl: string
+  fontFamily: string
+  dark?: boolean
+}) {
+  const resolved = { ...defaults, ...Object.fromEntries(Object.entries(palette).filter(([, v]) => v)) }
+  const style = {
+    '--gold': resolved.accent,
+    background: resolved.background,
+    color: resolved.text,
+    fontFamily: fontFamily || undefined,
+  } as React.CSSProperties
   return (
-    <div style={style} className="flex flex-col sm:flex-row gap-3">
-      <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-[#2C1A0E] flex-1">
-        {logoUrl ? (
-          <img src={logoUrl} alt="" className="h-6 w-6 object-contain rounded" />
-        ) : (
-          <div className="h-6 w-6 rounded-full border-2 border-[#FBF0DC]" />
-        )}
-        <span className="font-deco text-lg tracking-[2px] text-[#FBF0DC]">{(name || 'RunRight').toUpperCase()}</span>
+    <div className={`rounded-lg border border-[var(--border)] overflow-hidden ${dark ? 'dark' : ''}`}>
+      <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-light)] bg-[var(--paper)] border-b border-[var(--border)]">
+        {label}
       </div>
-      <div className="flex items-center gap-3 px-4 py-3 rounded-lg border border-[var(--border)] bg-[var(--paper)]">
-        <button type="button" tabIndex={-1} className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white" style={{ background: 'var(--gold)' }}>
-          Primary Button
-        </button>
-        <span className="text-xs font-medium" style={{ color: 'var(--gold)' }}>Accent text</span>
+      <div style={style} className="p-3 space-y-3">
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: resolved.sidebar_bg }}>
+          {logoUrl ? (
+            <img src={logoUrl} alt="" className="h-5 w-5 object-contain rounded" />
+          ) : (
+            <div className="h-5 w-5 rounded-full border-2" style={{ borderColor: resolved.sidebar_text }} />
+          )}
+          <span className="font-deco text-sm tracking-[2px]" style={{ color: resolved.sidebar_text, fontFamily: fontFamily || undefined }}>
+            {(name || 'RunRight').toUpperCase()}
+          </span>
+        </div>
+        <div className="flex items-center gap-3 px-3 py-2 rounded-lg border" style={{ borderColor: resolved.accent + '40', background: resolved.surface }}>
+          <button type="button" tabIndex={-1} className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white" style={{ background: resolved.accent }}>
+            Button
+          </button>
+          <span className="text-xs">Body text</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// A titled block of 6 labeled color pickers (background/surface/text/sidebar
+// bg/sidebar text/accent) for one theme mode. Blank = use the built-in default.
+function ThemePaletteEditor({
+  title, palette, onChange, disabled, defaults,
+}: {
+  title: string
+  palette: ThemePalette
+  onChange: (next: ThemePalette) => void
+  disabled: boolean
+  defaults: Required<ThemePalette>
+}) {
+  const fields: { key: keyof ThemePalette; label: string }[] = [
+    { key: 'background', label: 'Background' },
+    { key: 'surface', label: 'Surface (cards)' },
+    { key: 'text', label: 'Text' },
+    { key: 'sidebar_bg', label: 'Sidebar Background' },
+    { key: 'sidebar_text', label: 'Sidebar Text' },
+    { key: 'accent', label: 'Accent' },
+  ]
+  return (
+    <div className="border border-[var(--border)] rounded-lg p-4">
+      <p className="text-sm font-semibold text-[var(--text)] mb-3">{title}</p>
+      <div className="space-y-2.5">
+        {fields.map(({ key, label }) => (
+          <div key={key} className="flex items-center gap-2">
+            <input
+              type="color"
+              value={palette[key] || defaults[key]}
+              disabled={disabled}
+              onChange={e => onChange({ ...palette, [key]: e.target.value })}
+              className="w-8 h-8 rounded border border-[var(--border)] bg-transparent cursor-pointer disabled:cursor-not-allowed flex-shrink-0"
+            />
+            <span className="text-xs text-[var(--text-mid)] flex-1">{label}</span>
+            {palette[key] && !disabled && (
+              <button type="button" onClick={() => onChange({ ...palette, [key]: '' })} className="text-[10px] text-[var(--text-light)] hover:text-[var(--red)] hover:underline">
+                Reset
+              </button>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   )
